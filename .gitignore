@@ -18,12 +18,10 @@ node_modules/
 frontend/node_modules/
 frontend/.next/
 
-# Data — generated/large files
+# Data — generated/large files and duplicate root folder
 backend/Data/enterprise-attack.json
-Data/enterprise-attack.json
 backend/Data/enriched_cves.csv
-Data/enriched_cves.csv
-Data/Data/
+Data/
 
 # Docs — zip submissions and macOS junk
 docs/*.zip
