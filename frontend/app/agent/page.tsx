@@ -12,6 +12,8 @@ const EXAMPLE_PROMPTS = [
   "Which vulnerabilities have public exploits?",
   "What anomalies did the model detect?",
   "What should a SOC analyst do next?",
+  "How does the risk score work?",
+  "How is this different from a simple CVE database?",
 ];
 
 interface Message {
@@ -33,6 +35,7 @@ function IntentBadge({ intent }: { intent: string }) {
     recommendation_query: "Recommendations",
     search_query: "Search",
     summary_query: "Summary",
+    open_project_question: "Project Q&A",
     general_help: "Help",
   };
   return (

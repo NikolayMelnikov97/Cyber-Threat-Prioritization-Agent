@@ -12,12 +12,12 @@ _INTENT_PATTERNS = [
     ("kev_query",          re.compile(r"\b(kev|known exploited|cisa|actively exploit)", re.I)),
     ("exploit_query",      re.compile(r"\bexploit|\bpoc\b|\bproof.of.concept", re.I)),
     ("anomaly_query",      re.compile(r"\banomal|\bunusual|\boutlier|\bstrange|\bflagged", re.I)),
+    ("open_project_question", re.compile(r"\b(presentation|assignment|project|limitation|how (does|do|is|are) (this|the|it|your)|what (is|are) (this|the project)|teach|course|workshop|explain (the |this )?(system|architecture|algorithm|model|approach|method|technique))\b", re.I)),
     ("summary_query",      re.compile(r"\b(summar|overview|landscape|dataset|overall|big picture|report)\b", re.I)),
     ("top_risks",          re.compile(r"\b(top|highest|most critical|biggest|worst|focus|priority|today)\b", re.I)),
     ("recommendation_query", re.compile(r"\b(recommend|what should|next step|action|patch|mitigat|response|fix|remediat)\b", re.I)),
     ("search_query",       re.compile(r"\b(search|find|look for|vulnerabilit(y|ies) (with|about|related))\b", re.I)),
 ]
-
 
 _CVE_AGNOSTIC_INTENTS = {"top_risks", "recommendation_query", "summary_query", "search_query"}
 
@@ -32,12 +32,13 @@ def detect_intent(message: str) -> str:
             matched = intent
             break
     # If message contains a CVE ID and the matched intent is CVE-agnostic,
-    # the user is almost certainly asking about that specific CVE.
+    # the user is asking about that specific CVE.
     if cve_ids and (matched is None or matched in _CVE_AGNOSTIC_INTENTS):
         return "cve_explanation"
     if matched:
         return matched
-    return "general_help"
+    # Any other question → open-ended project-aware handling
+    return "open_project_question"
 
 
 # ── CWE-based recommendation rules ──────────────────────────────────────────
@@ -78,6 +79,96 @@ def _rce_advice(description: str) -> str:
     return ""
 
 
+# ── Project context builder ──────────────────────────────────────────────────
+
+def _build_project_context() -> str:
+    df = recommender._df
+    stats_lines = ""
+    if df is not None:
+        counts = df["risk_label"].value_counts()
+        stats_lines = (
+            f"\nLIVE DATASET STATS (as of current run):\n"
+            f"  Total CVEs analysed: {len(df):,}\n"
+            f"  Critical: {int(counts.get('Critical', 0))} | High: {int(counts.get('High', 0))} | "
+            f"Medium: {int(counts.get('Medium', 0))} | Low: {int(counts.get('Low', 0))}\n"
+            f"  In CISA KEV (actively exploited): {int(df['is_kev'].sum())}\n"
+            f"  With public exploits (Exploit-DB): {int(df['has_exploit'].sum())}\n"
+            f"  Anomalies detected by Isolation Forest: {int(df['is_anomaly'].sum())}\n"
+        )
+
+    return f"""PROJECT: Cyber Threat Prioritization Agent
+COURSE: AI & ML Innovation Workshop — Final Project
+
+GOAL:
+An AI-powered full-stack system that helps SOC analysts prioritize CVE vulnerabilities
+based on real-world risk — not just CVSS scores alone. The system combines multiple
+data sources and ML techniques to surface the vulnerabilities that matter most.
+
+DATASETS USED:
+  1. NVD CVE (National Vulnerability Database): 20,000 most recent CVEs from 2026 and prior years.
+     Fields: CVE ID, CVSS base score, description, CWE weakness type, published date, references count.
+  2. CISA KEV (Known Exploited Vulnerabilities catalog): ~1,200 CVEs confirmed as actively exploited in the wild.
+     Adding KEV status adds +2.0 points to the composite risk score.
+  3. Exploit-DB: ~50,000 public exploits. Used to flag CVEs with publicly available proof-of-concept code.
+     Having a public exploit adds +1.5 points to the composite risk score.
+  4. MITRE ATT&CK Enterprise: attack technique framework (downloaded for context and future use).
+
+ML / NLP METHODS:
+  - TF-IDF (Term Frequency-Inverse Document Frequency): converts CVE text descriptions into numerical
+    vectors. Captures which terms are rare and informative across the corpus.
+  - Cosine Similarity: measures the angle between two TF-IDF vectors (range 0–1).
+    Higher = more semantically similar descriptions. Used to find related CVEs.
+  - Jaccard Similarity: measures the ratio of shared words to total words between two CVE descriptions.
+    Better for exact keyword overlap; was compared against cosine in Assignment 2.
+    Cosine generally outperforms Jaccard for semantic similarity; Jaccard better for categorical matching.
+  - K-Means Clustering (k=15): groups CVEs into 15 vulnerability families based on description similarity.
+    Uses TruncatedSVD (LSA) to reduce TF-IDF dimensions to 50 before clustering for efficiency.
+    Each cluster is labelled with its top-5 keywords (e.g., "sql, injection, authentication, bypass").
+  - Isolation Forest (contamination=5%): detects CVEs with anomalous risk profiles —
+    unusual combinations of CVSS score, KEV status, exploit availability, and references count.
+    An anomaly means the CVE stands out statistically from peers with similar scores.
+
+RISK SCORING FORMULA (composite, 0–10 scale):
+  risk_score = min(
+    0.5 × CVSS_base_score
+    + 2.0 × is_kev        (boolean: is it in CISA KEV?)
+    + 1.5 × has_exploit   (boolean: is there a public exploit?)
+    + 0.5 × min(references_count / 20, 1) × 10  (community attention, capped)
+  , 10)
+  Labels: Critical (≥9.0), High (≥7.0), Medium (≥4.0), Low (<4.0)
+  Why this matters: a CVSS 7.0 CVE with no KEV/exploit may be lower priority than
+  a CVSS 5.0 CVE that is actively exploited in the wild.
+
+AGENT CAPABILITIES (what users can ask):
+  - Top-priority CVEs right now
+  - Full profile and explanation for any specific CVE
+  - Similar CVEs using TF-IDF cosine similarity
+  - CVEs in the CISA KEV catalog
+  - CVEs with public exploits from Exploit-DB
+  - Anomalies flagged by Isolation Forest
+  - Keyword or CVE ID search
+  - Threat landscape summary
+  - Analyst remediation recommendations
+
+ARCHITECTURE:
+  User question → Intent detection (regex) → Tool selection (ML modules) →
+  Compact context assembly → Gemini 1.5 Flash → Analyst answer + related CVEs
+
+TECH STACK:
+  Backend: FastAPI (Python) | Frontend: Next.js 15 + TypeScript + Tailwind CSS
+  ML: scikit-learn (TF-IDF, K-Means, TruncatedSVD, Isolation Forest, cosine similarity)
+  LLM: Google Gemini (gemini-2.5-flash-lite) for natural language generation
+  Data: CSV files (NVD, KEV, ExploitDB) — no live internet queries during runtime
+{stats_lines}
+LIMITATIONS:
+  - Based on pre-downloaded static datasets, not a live threat feed
+  - NVD dataset covers 20,000 CVEs — very old or very new CVEs may not be present
+  - Risk score is a heuristic model, not a certified security standard
+  - Gemini responses are AI-generated — always verify critical decisions with official sources
+  - The system does not perform asset discovery or network scanning
+"""
+
+
 # ── Context builders (compact — never send the full dataset) ─────────────────
 
 def _cve_context(cve: dict) -> str:
@@ -115,7 +206,7 @@ def _brief_cve(c: dict) -> str:
 # ── Offline (template) response builders ─────────────────────────────────────
 
 def _offline_top_risks(cves: list[dict]) -> str:
-    lines = [f"Based on current threat intelligence data, here are the highest-priority vulnerabilities requiring immediate analyst attention:\n"]
+    lines = ["Based on current threat intelligence data, here are the highest-priority vulnerabilities requiring immediate analyst attention:\n"]
     for i, c in enumerate(cves[:5], 1):
         flags = []
         if c.get("is_kev"):
@@ -184,6 +275,44 @@ def _offline_summary(stats: dict, top: list[dict]) -> str:
         "\n".join(f"  • {c['cve_id']} — {c.get('risk_label','?')} ({c.get('risk_score',0):.1f}/10)" for c in top[:5]) +
         "\n\nFocus immediately on KEV-listed and exploit-confirmed vulnerabilities. Review anomalies for hidden risks."
     )
+
+
+def _offline_open_question() -> str:
+    df = recommender._df
+    total = len(df) if df is not None else 0
+    return (
+        f"This is the Cyber Threat Prioritization Agent — an AI-powered system that helps SOC analysts "
+        f"prioritize {total:,} CVEs from the NVD, enriched with CISA KEV and Exploit-DB data.\n\n"
+        "The project combines several ML/NLP techniques:\n"
+        "  • TF-IDF + Cosine Similarity — to find semantically similar vulnerabilities\n"
+        "  • K-Means Clustering (k=15) — to group CVEs into vulnerability families\n"
+        "  • Isolation Forest — to detect anomalous risk profiles\n"
+        "  • Composite Risk Scoring — combining CVSS, KEV status, exploit availability, and references\n\n"
+        "Unlike a simple CVE database, this system ranks vulnerabilities by real-world risk, not just CVSS score alone. "
+        "A CVE with CVSS 5.0 that is actively exploited in the wild may rank higher than a CVSS 9.0 with no known exploitation.\n\n"
+        "For richer, Gemini-powered answers to project and architecture questions, "
+        "configure GEMINI_API_KEY in backend/.env and restart the server.\n\n"
+        "You can also ask me:\n"
+        "  • What are the top threats today?\n"
+        "  • Which CVEs are in the CISA KEV catalog?\n"
+        "  • What anomalies did the model detect?\n"
+        "  • Explain any specific CVE (e.g. CVE-2026-24061)"
+    )
+
+
+# ── Open-question context for Gemini ─────────────────────────────────────────
+
+_OPEN_QUESTION_INSTRUCTION = """
+The user is asking a general question about this project, its methods, architecture, datasets, or cybersecurity concepts.
+
+Answer based strictly on the project information provided above.
+- If the question is about this project, its datasets, ML methods, or cybersecurity concepts → answer clearly and helpfully.
+- If the question is completely unrelated to cybersecurity or this project (e.g. cooking, sports, politics) → politely decline and redirect to the project.
+- Do not invent CVE IDs, vulnerability data, or facts not present in the context.
+- Do not claim the system has live internet access or real-time data.
+- You may explain ML concepts (TF-IDF, cosine similarity, K-Means, Isolation Forest) in plain language.
+- You may help the user prepare a presentation or explain the project's value.
+"""
 
 
 # ── Main agent function ───────────────────────────────────────────────────────
@@ -347,24 +476,16 @@ def handle(message: str) -> dict:
                 "\n".join(f"  • {c['cve_id']} — Risk {c.get('risk_score',0):.1f}/10 ({c.get('risk_label','?')}) — {(c.get('description') or '')[:150]}" for c in results)
             )
 
-    # ── general_help ──
+    # ── open_project_question — flexible fallback for any other question ──
     else:
-        df = recommender._df
-        total = len(df) if df is not None else 0
-        answer = (
-            f"I'm your Cyber Threat Prioritization AI Agent. I have analysed {total:,} CVEs from NVD, enriched with CISA KEV and Exploit-DB data.\n\n"
-            "You can ask me:\n"
-            "  • What are the top threats I should focus on today?\n"
-            "  • Explain CVE-2026-24061\n"
-            "  • Which CVEs are in the CISA KEV catalog?\n"
-            "  • Which vulnerabilities have public exploits?\n"
-            "  • What anomalies did the model detect?\n"
-            "  • Show me CVEs similar to CVE-2026-24061\n"
-            "  • Summarise the threat landscape\n"
-            "  • What should a SOC analyst do next?"
-        )
-        intent = "general_help"
-        sources = []
+        intent = "open_project_question"
+        sources = ["Project Knowledge Base", "Live Dataset Stats"]
+        project_ctx = _build_project_context()
+        context_text = project_ctx + _OPEN_QUESTION_INSTRUCTION
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_open_question()
 
     return {
         "answer": answer,
