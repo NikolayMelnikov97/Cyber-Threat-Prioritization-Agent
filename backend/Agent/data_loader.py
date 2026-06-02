@@ -150,6 +150,25 @@ def load_data(force_rebuild: bool = False) -> pd.DataFrame:
     else:
         df["mitre_techniques"] = ""
 
+    # OSV package vulnerability data (optional)
+    osv_path = os.path.join(DATA_DIR, "osv_packages.csv")
+    if os.path.exists(osv_path):
+        osv = pd.read_csv(osv_path, low_memory=False)
+        osv_agg = (
+            osv[osv["cve_id"].str.startswith("CVE-", na=False)]
+            .groupby("cve_id")
+            .agg(affected_packages=(
+                "package_name",
+                lambda x: ",".join(sorted(set(x.dropna()))[:10]),
+            ))
+            .reset_index()
+        )
+        df = df.merge(osv_agg, on="cve_id", how="left")
+        df["affected_packages"] = df["affected_packages"].fillna("")
+        print(f"[data_loader] OSV packages joined: {osv_agg.shape[0]} CVEs with package data")
+    else:
+        df["affected_packages"] = ""
+
     # CVSS vector parsing
     parsed = df["cvss_vector"].apply(_parse_cvss_vector).apply(pd.Series)
     df = pd.concat([df, parsed], axis=1)

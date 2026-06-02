@@ -11,7 +11,7 @@ import json
 import os
 import re
 
-INPUT = os.path.join(os.path.dirname(__file__), "..", "enterprise-attack.json")
+INPUT = os.path.join(os.path.dirname(__file__), "enterprise-attack.json")
 OUTPUT = os.path.join(os.path.dirname(__file__), "..", "backend", "Data", "mitre_cve_links.csv")
 
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
