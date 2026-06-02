@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.egg-info/
+
+# Data — keep CSVs, skip large JSON
+backend/Data/enterprise-attack.json
+Data/enterprise-attack.json
+backend/Data/enriched_cves.csv
+Data/enriched_cves.csv
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# macOS
+.DS_Store
+
+# Archives (large files already in repo history would be a problem)
+Archive/first_100k_cves.csv
+Archive/first_20k_cves.csv

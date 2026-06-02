@@ -1,0 +1,46 @@
+def explain(cve: dict) -> str:
+    cve_id = cve.get("cve_id", "Unknown CVE")
+    risk_score = cve.get("risk_score", 0)
+    risk_label = cve.get("risk_label", "Unknown")
+    severity_score = cve.get("severity_score", 0)
+    cwe = cve.get("cwe", "Unknown")
+    is_kev = cve.get("is_kev", False)
+    has_exploit = cve.get("has_exploit", False)
+    cluster_label = cve.get("cluster_label", "")
+    is_anomaly = cve.get("is_anomaly", False)
+    required_action = cve.get("requiredAction") or ""
+    description = (cve.get("description") or "")[:200]
+
+    parts = [f"{cve_id} carries a {risk_label} risk score of {risk_score:.1f}/10 (CVSS base: {severity_score:.1f})."]
+
+    if is_kev and has_exploit:
+        parts.append("It is actively exploited in the wild (CISA KEV) and has a public exploit available — treat as top priority.")
+    elif is_kev:
+        parts.append("It is listed in the CISA Known Exploited Vulnerabilities catalog, meaning it is actively exploited in the wild.")
+    elif has_exploit:
+        parts.append("A public exploit exists for this vulnerability, raising its real-world danger significantly.")
+    else:
+        parts.append("No public exploit or KEV listing found at this time.")
+
+    if cwe and cwe != "UNKNOWN":
+        parts.append(f"Weakness type: {cwe}.")
+
+    if cluster_label:
+        parts.append(f"This CVE belongs to the '{cluster_label}' vulnerability family.")
+
+    if is_anomaly:
+        parts.append("Anomaly detected: this CVE has an unusual risk profile compared to others with a similar CVSS score — investigate further.")
+
+    action = required_action.strip() if required_action else ""
+    if action:
+        parts.append(f"CISA recommended action: {action}")
+    elif risk_label == "Critical":
+        parts.append("Recommended action: Apply vendor patch immediately. Escalate to security team.")
+    elif risk_label == "High":
+        parts.append("Recommended action: Patch within 7 days. Monitor for active exploitation.")
+    elif risk_label == "Medium":
+        parts.append("Recommended action: Schedule patching within 30 days. Review exposure.")
+    else:
+        parts.append("Recommended action: Apply patch in the next maintenance window.")
+
+    return " ".join(parts)
