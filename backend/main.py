@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from Agent.data_loader import load_data
 from Agent.risk_scorer import score_cves
@@ -8,6 +9,8 @@ from Agent.clustering import fit_clusters
 from Agent.anomaly_detector import detect_anomalies
 from Agent import recommender
 from Agent.nlp_explainer import explain
+from Agent import chat_agent
+from Agent import llm_client
 
 
 @asynccontextmanager
@@ -27,7 +30,7 @@ app = FastAPI(title="Cyber Threat Prioritization Agent", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -65,3 +68,16 @@ def search(q: str = Query(..., min_length=1)):
     if not results:
         return []
     return results
+
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+@app.post("/agent/chat")
+def agent_chat(req: ChatRequest):
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    result = chat_agent.handle(req.message.strip())
+    result["gemini_enabled"] = llm_client.is_enabled()
+    return result

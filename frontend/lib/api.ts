@@ -22,8 +22,19 @@ export interface CVE {
   similarity_score?: number;
 }
 
-async function apiFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${BACKEND_URL}${path}`, { cache: "no-store" });
+export interface ChatResponse {
+  answer: string;
+  intent: string;
+  sources: string[];
+  related_cves: CVE[];
+  gemini_enabled: boolean;
+}
+
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    cache: "no-store",
+    ...options,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err?.detail || `API error ${res.status}`);
@@ -34,7 +45,13 @@ async function apiFetch<T>(path: string): Promise<T> {
 export const getCVE = (id: string) => apiFetch<CVE>(`/cve/${id}`);
 export const getSimilar = (id: string, n = 5) =>
   apiFetch<CVE[]>(`/cve/${id}/similar?n=${n}`);
-export const getTopRisks = (n = 20) =>
-  apiFetch<CVE[]>(`/top-risks?n=${n}`);
+export const getTopRisks = (n = 20) => apiFetch<CVE[]>(`/top-risks?n=${n}`);
 export const searchCVEs = (q: string) =>
   apiFetch<CVE[]>(`/search?q=${encodeURIComponent(q)}`);
+
+export const chatWithAgent = (message: string) =>
+  apiFetch<ChatResponse>("/agent/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
