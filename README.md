@@ -14,20 +14,22 @@ Ask natural-language questions and get analyst-quality answers:
 - *"What are the current threats on my environment?"*
 - *"What CVEs affect Apache / Cisco / Windows?"*
 - *"Which CVEs have been used in ransomware attacks?"*
+- *"Which CVEs are most likely to be exploited?"* (EPSS)
+- *"Show me CVEs with verified remote exploits"*
+- *"Which CVEs are remotely exploitable with no authentication?"*
 - *"Tell me about APT28 and what systems they target"*
 - *"What do we know about Lazarus Group?"*
 - *"Show me the latest CVEs published recently"*
 - *"Which CVEs are in the CISA KEV catalog?"*
 - *"What anomalies did the model detect?"*
 - *"Explain CVE-2026-24061"*
-- *"Show me similar vulnerabilities to CVE-2026-24061"*
 - *"What should a SOC analyst patch first?"*
 
 The agent routes each question to the right ML tools, builds structured context, and generates a professional analyst response — powered by Gemini 2.5 Flash Lite when a key is configured, or template-based responses without one.
 
 ### My Environment
 
-A dedicated profile page where you select the vendors and products you use (Apple, Cisco, Ivanti, etc.). The agent automatically identifies which threat actor groups target your stack and surfaces the most relevant CVEs — including a "what are the current threats on my environment?" query in the chat.
+A dedicated profile page where you select the vendors and products you use (Apple, Cisco, Ivanti, etc.). The agent automatically identifies which threat actor groups target your stack and surfaces the most relevant CVEs.
 
 ### Dashboard
 
@@ -35,7 +37,7 @@ A dedicated profile page where you select the vendors and products you use (Appl
 - Browse top highest-risk CVEs or latest by publication date
 - Filter by: KEV only / Has Exploit / Ransomware / Anomaly
 - Sort by: Risk Score or Date Published
-- Full CVE detail: risk score, KEV status, exploit availability, ransomware flag, vendor/product, CISA patch deadline, anomaly flag, cluster, agent explanation, similar CVEs
+- Full CVE detail: risk score, EPSS score, exploit type/verification, CVSS attack profile, KEV status, ransomware flag, vendor/product, CISA patch deadline, anomaly flag, cluster, agent explanation, similar CVEs
 
 ---
 
@@ -47,7 +49,8 @@ A dedicated profile page where you select the vendors and products you use (Appl
 | Cosine Similarity | Find semantically similar CVEs |
 | K-Means Clustering (k=15, LSA reduced) | Group CVEs into vulnerability families |
 | Isolation Forest | Detect anomalous CVE risk profiles |
-| Composite Risk Scoring | Combine CVSS + KEV + Exploit + References into a 0–10 score |
+| Composite Risk Scoring | Combine CVSS + KEV + EPSS + Exploit metadata + References |
+| CVSS Vector Parsing | Extract attack vector, privileges, user interaction per CVE |
 | Intent Detection (regex routing) | Route natural-language queries to the right ML tools |
 | CWE-based Rule Engine | Generate weakness-specific remediation advice |
 | Gemini 2.5 Flash Lite (optional) | Generate analyst-quality natural-language explanations |
@@ -59,28 +62,28 @@ A dedicated profile page where you select the vendors and products you use (Appl
 ```
 User Question + Environment Context (vendors)
      ↓
-Intent Detection (regex patterns → 13 intents)
+Intent Detection (regex patterns → 16 intents)
      ↓
 Tool Selection (one or more of):
-  ├── Risk Scorer        → composite 0–10 score
-  ├── Recommender        → TF-IDF similarity lookup
+  ├── Risk Scorer        → composite 0–10 score (CVSS + KEV + EPSS + exploits)
+  ├── Recommender        → TF-IDF similarity + CVSS/vendor search
   ├── KEV data           → CISA Known Exploited Vulnerabilities
-  ├── Exploit data       → Exploit-DB public exploit flag
+  ├── EPSS data          → exploit probability scores (FIRST.org)
+  ├── Exploit-DB         → verified/remote/platform exploit detail
   ├── Clustering         → K-Means cluster + keywords
   ├── Anomaly Detector   → Isolation Forest flag
   ├── Threat Actor DB    → 15 curated APT/ransomware groups
-  └── Vendor Search      → product/vendor CVE matching
+  ├── OSV packages       → open-source package vulnerability mapping
+  └── MITRE ATT&CK       → technique-to-CVE links
      ↓
 Context Assembly (compact — never the full dataset)
      ↓
-Gemini 2.5 Flash Lite (if key configured)
-OR
-Template-based offline response
+Gemini 2.5 Flash Lite (if key configured)  OR  Template-based offline response
      ↓
 Analyst Answer + Related CVEs + Sources
 ```
 
-**Supported intents:** `top_risks`, `cve_explanation`, `similar_cves`, `kev_query`, `exploit_query`, `anomaly_query`, `recommendation_query`, `search_query`, `summary_query`, `latest_query`, `system_query`, `ransomware_query`, `threat_actor_query`, `environment_query`
+**Supported intents:** `top_risks`, `cve_explanation`, `similar_cves`, `kev_query`, `epss_query`, `exploit_query`, `exploit_detail_query`, `cvss_filter_query`, `anomaly_query`, `recommendation_query`, `search_query`, `summary_query`, `latest_query`, `system_query`, `ransomware_query`, `threat_actor_query`, `environment_query`
 
 ---
 
@@ -92,18 +95,39 @@ Analyst Answer + Related CVEs + Sources
 | Frontend | Next.js 15 + TypeScript + Tailwind CSS |
 | ML / NLP | scikit-learn (TF-IDF, K-Means, TruncatedSVD, Isolation Forest, cosine similarity) |
 | Generative AI | Google Gemini 2.5 Flash Lite (optional) |
-| Data | NVD CVE API, CISA KEV, Exploit-DB, curated threat actor database |
+| Data | NVD, CISA KEV, Exploit-DB, EPSS, OSV, MITRE ATT&CK, curated threat actor database |
 
 ---
 
 ## Data Sources
 
-| Dataset | Source | Records |
-|---------|--------|---------|
-| NVD CVE | NIST National Vulnerability Database | 20,000 |
-| CISA KEV | Known Exploited Vulnerabilities catalog | ~1,500 |
-| Exploit-DB | Public exploit database | ~47,000 |
-| Threat Actor DB | Curated APT/ransomware intelligence | 15 groups |
+| Dataset | Source | Records | Refresh |
+|---------|--------|---------|---------|
+| NVD CVE | NIST National Vulnerability Database | 20,000 | `Scripts/fetch_CVE.py` |
+| CISA KEV | Known Exploited Vulnerabilities catalog | ~1,500 | `Scripts/fetch_kev.py` |
+| Exploit-DB | Public exploit database | ~47,000 | `Scripts/fetch_exploitdb_csv.py` |
+| EPSS | Exploit Prediction Scoring System (FIRST.org) | 337,000+ CVEs | `Scripts/fetch_epss.py` |
+| OSV | Open Source Vulnerabilities (Google) | ~279,000 package entries | `Scripts/fetch_osv.py` |
+| MITRE ATT&CK | Enterprise attack framework + CVE links | ~600 techniques | `Scripts/fetch_mitre_attack.py` + `parse_mitre_attack.py` |
+| Threat Actor DB | Curated APT/ransomware intelligence | 15 groups | `backend/Agent/threat_actors.py` |
+
+---
+
+## Risk Score Formula
+
+```
+risk_score = min(
+  0.5 × CVSS_base_score
+  + 2.0 × is_kev                           (actively exploited by CISA)
+  + epss_score × 2.0                        (exploit probability, 0–1)
+  + exploit_verified × 1.2                  (verified exploit in Exploit-DB)
+  + (exploit_type == "remote") × 0.5        (remote exploit bonus)
+  + has_exploit × 0.3                       (any exploit)  [all capped at 1.5]
+  + min(references_count / 20, 1) × 5.0    (community attention)
+, 10)
+```
+
+Labels: Critical ≥ 9.0 / High ≥ 7.0 / Medium ≥ 4.0 / Low < 4.0
 
 ---
 
@@ -112,7 +136,7 @@ Analyst Answer + Related CVEs + Sources
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
-| GET | `/cve/{id}` | Full CVE profile with risk score and explanation |
+| GET | `/cve/{id}` | Full CVE profile with 36 enriched fields |
 | GET | `/cve/{id}/similar?n=5` | Top N similar CVEs (TF-IDF cosine similarity) |
 | GET | `/top-risks?n=20` | Top N highest-risk CVEs |
 | GET | `/latest-cves?n=20` | Latest N CVEs sorted by publication date |
@@ -126,21 +150,21 @@ Analyst Answer + Related CVEs + Sources
 ```json
 // Request
 {
-  "message": "What are the current threats on my environment?",
+  "message": "Which CVEs are most likely to be exploited?",
   "environment_vendors": ["Cisco", "Microsoft", "Ivanti"]
 }
 
 // Response
 {
-  "answer": "Threat assessment for your environment...",
-  "intent": "environment_query",
-  "sources": ["Threat Actor Database", "CISA KEV", "NVD CVE", "Risk Scorer"],
+  "answer": "Based on EPSS scores...",
+  "intent": "epss_query",
+  "sources": ["EPSS (FIRST.org)", "NVD CVE", "Risk Scorer"],
   "related_cves": [...],
   "gemini_enabled": true
 }
 ```
 
-`environment_vendors` is optional — omit it or pass `[]` for general queries.
+`environment_vendors` is optional — pass your tech stack for environment-aware answers.
 
 ---
 
@@ -162,14 +186,23 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-The backend starts at `http://localhost:8000`. On first run it:
-1. Merges NVD + KEV + Exploit-DB into an enriched dataset
-2. Builds K-Means clusters and anomaly flags
-3. Builds the TF-IDF similarity index
+The backend starts at `http://localhost:8000`. On first run it merges all data sources, builds ML models, and creates a TF-IDF similarity index (~30 seconds).
 
-API docs available at `http://localhost:8000/docs`.
+API docs at `http://localhost:8000/docs`.
 
-### 2. Gemini (Optional but recommended)
+### 2. Download additional datasets (recommended)
+
+```bash
+cd Scripts
+python fetch_epss.py          # EPSS exploit probability scores (~2 MB)
+python fetch_mitre_attack.py  # MITRE ATT&CK STIX JSON (~25 MB)
+python parse_mitre_attack.py  # Parse ATT&CK → CVE links
+python fetch_osv.py           # OSV open source vulns (~300 MB, takes ~5 min)
+```
+
+After running, delete `backend/Data/enriched_cves.csv` and restart the backend to rebuild with the new data.
+
+### 3. Gemini (Optional but recommended)
 
 ```bash
 cp backend/.env.example backend/.env
@@ -183,17 +216,13 @@ cp backend/.env.example backend/.env
 | `GEMINI_API_KEY` | *(none)* | API key from [aistudio.google.com](https://aistudio.google.com) |
 | `GEMINI_MODEL` | `gemini-2.5-flash-lite` | Gemini model to use |
 
-Without `GEMINI_API_KEY` the agent uses template-based responses (fully functional). With it, responses are AI-generated.
-
-### 3. Frontend
+### 4. Frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-Open `http://localhost:3000`.
 
 | Page | URL |
 |------|-----|
@@ -208,18 +237,15 @@ Open `http://localhost:3000`.
 ### Backend → Render
 
 1. Create a **Web Service** on [render.com](https://render.com)
-2. Connect the GitHub repo
-3. Set:
-   - **Root directory**: `backend`
-   - **Build command**: `pip install -r requirements.txt`
-   - **Start command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. Add environment variable: `GEMINI_API_KEY=your-key`
+2. Connect the GitHub repo, set **Root directory**: `backend`
+3. **Build command**: `pip install -r requirements.txt`
+4. **Start command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+5. Add environment variable: `GEMINI_API_KEY=your-key`
 
 ### Frontend → Vercel
 
-1. Import the repo on [vercel.com](https://vercel.com)
-2. Set **Root directory**: `frontend`
-3. Add environment variable: `NEXT_PUBLIC_API_URL=https://your-app.onrender.com`
+1. Import the repo on [vercel.com](https://vercel.com), set **Root directory**: `frontend`
+2. Add environment variable: `NEXT_PUBLIC_API_URL=https://your-app.onrender.com`
 
 ---
 
@@ -232,28 +258,33 @@ Cyber-Threat-Prioritization-Agent/
 │   ├── requirements.txt
 │   ├── .env.example               # Copy to .env and add GEMINI_API_KEY
 │   ├── Agent/
-│   │   ├── data_loader.py         # Merge NVD + KEV + Exploit-DB
-│   │   ├── risk_scorer.py         # Composite 0–10 risk score
+│   │   ├── data_loader.py         # Merge all data sources → 36-column enriched CSV
+│   │   ├── risk_scorer.py         # Composite 0–10 risk formula (CVSS+KEV+EPSS+exploits)
 │   │   ├── clustering.py          # K-Means + TruncatedSVD (LSA)
 │   │   ├── anomaly_detector.py    # Isolation Forest
-│   │   ├── recommender.py         # TF-IDF cosine similarity index
-│   │   ├── nlp_explainer.py       # Template NLP summaries
-│   │   ├── chat_agent.py          # Intent routing + tool calls (13 intents)
+│   │   ├── recommender.py         # TF-IDF index + vendor/CVSS/package search
+│   │   ├── nlp_explainer.py       # Template NLP summaries with EPSS + CVSS context
+│   │   ├── chat_agent.py          # Intent routing + 16 intent handlers
 │   │   ├── llm_client.py          # Gemini 2.5 Flash Lite + offline fallback
-│   │   └── threat_actors.py       # Curated APT/ransomware group database
-│   └── Data/                      # Source CSV datasets (NVD, KEV, Exploit-DB)
+│   │   └── threat_actors.py       # Curated APT/ransomware group database (15 groups)
+│   └── Data/                      # CSV datasets (NVD, KEV, Exploit-DB, EPSS, OSV, MITRE)
 ├── frontend/
 │   ├── app/
-│   │   ├── page.tsx               # Dashboard: search, filters, top risks, latest
+│   │   ├── page.tsx               # Dashboard: search, filters, sort, top/latest
 │   │   ├── agent/page.tsx         # AI Agent chat interface
 │   │   ├── environment/page.tsx   # My Environment: vendor selector + threat actors
-│   │   └── cve/[id]/page.tsx      # CVE detail page
+│   │   └── cve/[id]/page.tsx      # CVE detail with all 36 enriched fields
 │   ├── components/
-│   │   ├── CVECard.tsx            # CVE card with KEV/exploit/ransomware badges
+│   │   ├── CVECard.tsx            # CVE card: KEV/EXPLOIT/RANSOM/EPSS badges
 │   │   ├── RiskBadge.tsx          # Risk level color badge
 │   │   └── SimilarCVEList.tsx     # Similar CVE list
-│   └── lib/api.ts                 # API client + TypeScript types
-├── Scripts/                       # Data collection scripts (NVD, KEV, Exploit-DB, MITRE)
-├── Similarity Algorithms/         # Cosine + Jaccard similarity implementations
-└── docs/                          # Assignment documents and academic papers
+│   └── lib/api.ts                 # API client + TypeScript types (36 CVE fields)
+└── Scripts/
+    ├── fetch_CVE.py               # NVD CVE API → latest_20k_cves_from_2026.csv
+    ├── fetch_kev.py               # CISA KEV → cisa_kev.csv
+    ├── fetch_exploitdb_csv.py     # Exploit-DB → exploitdb.csv
+    ├── fetch_epss.py              # EPSS scores → epss_scores.csv
+    ├── fetch_osv.py               # OSV packages → osv_packages.csv
+    ├── fetch_mitre_attack.py      # MITRE ATT&CK STIX → enterprise-attack.json
+    └── parse_mitre_attack.py      # Parse ATT&CK JSON → mitre_cve_links.csv
 ```
