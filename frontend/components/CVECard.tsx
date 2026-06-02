@@ -31,7 +31,12 @@ export default function CVECard({
           )}
           {cve.has_exploit && (
             <span className="rounded bg-orange-900 px-1.5 py-0.5 text-xs text-orange-300 font-semibold">
-              EXPLOIT
+              {cve.exploit_verified ? "VERIFIED EXPLOIT" : "EXPLOIT"}
+            </span>
+          )}
+          {cve.epss_score != null && cve.epss_score > 0.1 && (
+            <span className="rounded bg-purple-900 px-1.5 py-0.5 text-xs text-purple-300 font-semibold" title={`EPSS: ${(cve.epss_score * 100).toFixed(1)}% exploit probability`}>
+              EPSS {(cve.epss_percentile != null ? cve.epss_percentile * 100 : 0).toFixed(0)}%ile
             </span>
           )}
           <RiskBadge label={cve.risk_label} score={cve.risk_score} />

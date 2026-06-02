@@ -70,6 +70,9 @@ function IntentBadge({ intent }: { intent: string }) {
     ransomware_query: "Ransomware Intel",
     threat_actor_query: "Threat Actor Intel",
     environment_query: "My Environment",
+    epss_query: "EPSS Intel",
+    exploit_detail_query: "Exploit Detail",
+    cvss_filter_query: "CVSS Filter",
     general_help: "Help",
   };
   return (

@@ -11,6 +11,9 @@ _INTENT_PATTERNS = [
     ("cve_explanation",    re.compile(r"\b(explain|what is|tell me about|describe|details? (of|about|on)|look up)\b.+CVE-\d{4}-\d+", re.I)),
     ("similar_cves",       re.compile(r"\b(similar|like|related to|same (type|family|cluster) as)\b", re.I)),
     ("kev_query",          re.compile(r"\b(kev|known exploited|cisa|actively exploit)", re.I)),
+    ("epss_query",         re.compile(r"\bepss\b|exploit probabilit|likely to be exploit|probability of exploit|exploit prediction|most likely exploit\w*|exploit chance|exploit likelihood", re.I)),
+    ("exploit_detail_query", re.compile(r"\bverified exploit|remote exploit\w*|working exploit|metasploit\b|exploit type\b|local exploit\b|exploit platform\b|exploit (for|on) (windows|linux|android)", re.I)),
+    ("cvss_filter_query",  re.compile(r"\b(remotely exploitable|no auth|no authentication|no (user )?interaction|unauthenticated|network.?exploitable|wormable|zero.?click)\b", re.I)),
     ("exploit_query",      re.compile(r"\bexploit|\bpoc\b|\bproof.of.concept", re.I)),
     ("anomaly_query",      re.compile(r"\banomal|\bunusual|\boutlier|\bstrange|\bflagged", re.I)),
     ("open_project_question", re.compile(r"\b(presentation|assignment|project|limitation|how (does|do|is|are) (this|the|it|your)|what (is|are) (this|the project)|teach|course|workshop|explain (the |this )?(system|architecture|algorithm|model|approach|method|technique))\b", re.I)),
@@ -28,7 +31,7 @@ _INTENT_PATTERNS = [
 _CVE_AGNOSTIC_INTENTS = {
     "top_risks", "recommendation_query", "summary_query", "search_query",
     "latest_query", "system_query", "ransomware_query", "threat_actor_query",
-    "environment_query",
+    "environment_query", "epss_query", "exploit_detail_query", "cvss_filter_query",
 }
 
 
@@ -199,6 +202,21 @@ def _cve_context(cve: dict) -> str:
         f"References: {cve.get('references_count', 0)}",
         f"Description: {(cve.get('description') or '')[:400]}",
     ]
+    if cve.get("epss_score", 0) > 0:
+        pct = cve.get("epss_percentile", 0)
+        lines.append(f"EPSS Score: {cve['epss_score']:.4f} — {pct*100:.1f}th percentile (probability of exploitation in next 30 days)")
+    if cve.get("exploit_type"):
+        lines.append(f"Exploit Type: {cve['exploit_type']} | Verified: {cve.get('exploit_verified', False)} | Platform: {cve.get('exploit_platform','')}")
+    if cve.get("attack_vector"):
+        lines.append(
+            f"CVSS Components: AV={cve['attack_vector']} | PR={cve.get('privileges_required','')} | "
+            f"UI={cve.get('user_interaction','')} | C={cve.get('confidentiality','')} | "
+            f"I={cve.get('integrity','')} | A={cve.get('availability','')}"
+        )
+    if cve.get("cpe_vendors"):
+        lines.append(f"Affected Vendors (CPE): {cve['cpe_vendors'][:200]}")
+    if cve.get("mitre_techniques"):
+        lines.append(f"MITRE ATT&CK Techniques: {cve['mitre_techniques']}")
     if cve.get("vendorProject"):
         vendor_str = cve["vendorProject"]
         if cve.get("product"):
@@ -373,6 +391,48 @@ def _offline_environment(vendors: list[str], actors: list[dict], cves: list[dict
     else:
         lines.append("No specific CVEs found for your vendors in the current dataset.")
     lines.append("\nFor full details, visit the 'My Environment' page.")
+    return "\n".join(lines)
+
+
+def _offline_epss(cves: list[dict]) -> str:
+    if not cves:
+        return "No EPSS data available yet. Run Scripts/fetch_epss.py to download daily exploit probability scores."
+    lines = ["CVEs ranked by EPSS exploit probability (highest likelihood of being exploited within 30 days):\n"]
+    for i, c in enumerate(cves[:10], 1):
+        epss = c.get("epss_score", 0) or 0
+        pct = c.get("epss_percentile", 0) or 0
+        kev = " [KEV]" if c.get("is_kev") else ""
+        lines.append(f"{i}. {c['cve_id']} — EPSS {epss:.4f} ({pct*100:.1f}th pct){kev} | Risk {c.get('risk_score',0):.1f}/10")
+        lines.append(f"   {(c.get('description') or '')[:150]}")
+    lines.append("\nEPSS (Exploit Prediction Scoring System) by FIRST.org — updated daily. Higher percentile = higher real-world exploitation probability.")
+    return "\n".join(lines)
+
+
+def _offline_exploit_detail(cves: list[dict], query: str) -> str:
+    if not cves:
+        return "No CVEs with matching exploit details found in the current dataset."
+    lines = [f"CVEs with detailed exploit information matching your query:\n"]
+    for c in cves[:8]:
+        etype = c.get("exploit_type") or "unknown"
+        verified = "verified" if c.get("exploit_verified") else "unverified"
+        platform = c.get("exploit_platform") or "unknown platform"
+        lines.append(f"  • {c['cve_id']} — Risk {c.get('risk_score',0):.1f}/10 | {etype} exploit ({verified}) on {platform}")
+        lines.append(f"    {(c.get('description') or '')[:150]}")
+    lines.append("\nPrioritise verified remote exploits — these represent the highest real-world exploitation risk.")
+    return "\n".join(lines)
+
+
+def _offline_cvss_filter(cves: list[dict]) -> str:
+    if not cves:
+        return "No CVEs matching the specified CVSS criteria found."
+    lines = ["CVEs matching your CVSS filter (network-exploitable, no authentication required):\n"]
+    for c in cves[:10]:
+        av = c.get("attack_vector", "")
+        pr = c.get("privileges_required", "")
+        ui = c.get("user_interaction", "")
+        lines.append(f"  • {c['cve_id']} — CVSS {c.get('severity_score',0):.1f} | AV:{av} PR:{pr} UI:{ui} | Risk {c.get('risk_score',0):.1f}/10")
+        lines.append(f"    {(c.get('description') or '')[:150]}")
+    lines.append("\nNetwork-exploitable CVEs with no auth and no user interaction are the most dangerous class — they can be weaponised as worms.")
     return "\n".join(lines)
 
 
@@ -701,6 +761,78 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             answer = llm_client.generate(context_text, message)
         else:
             answer = _offline_threat_actor(actors)
+
+    # ── epss_query ──
+    elif intent == "epss_query":
+        df = recommender._df
+        epss_cves: list[dict] = []
+        if df is not None and "epss_score" in df.columns:
+            epss_rows = df[df["epss_score"] > 0].nlargest(15, "epss_score")
+            epss_cves = [recommender._row_to_dict(row) for _, row in epss_rows.iterrows()]
+        related_cves = epss_cves[:6]
+        sources = ["EPSS (FIRST.org)", "NVD CVE", "Risk Scorer"]
+        context_text = f"TOP CVEs BY EPSS EXPLOIT PROBABILITY:\n" + "\n".join(
+            f"  {c['cve_id']}: EPSS {c.get('epss_score',0):.4f} ({(c.get('epss_percentile',0) or 0)*100:.1f}th pct) | Risk {c.get('risk_score',0):.1f}/10{' [KEV]' if c.get('is_kev') else ''}"
+            for c in epss_cves
+        )
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_epss(epss_cves)
+
+    # ── exploit_detail_query ──
+    elif intent == "exploit_detail_query":
+        df = recommender._df
+        exp_cves: list[dict] = []
+        if df is not None:
+            q_lower = message.lower()
+            mask = df["has_exploit"] == True
+            if "verified" in q_lower:
+                mask &= df["exploit_verified"] == True
+            if "remote" in q_lower:
+                mask &= df["exploit_type"].str.contains("remote", case=False, na=False)
+            if "windows" in q_lower:
+                mask &= df["exploit_platform"].str.contains("windows", case=False, na=False)
+            if "linux" in q_lower:
+                mask &= df["exploit_platform"].str.contains("linux", case=False, na=False)
+            exp_rows = df[mask].nlargest(15, "risk_score")
+            exp_cves = [recommender._row_to_dict(row) for _, row in exp_rows.iterrows()]
+        related_cves = exp_cves[:6]
+        sources = ["Exploit-DB", "NVD CVE", "Risk Scorer"]
+        context_text = "CVEs WITH DETAILED EXPLOIT INFORMATION:\n" + "\n".join(
+            f"  {c['cve_id']}: {c.get('exploit_type','')} | verified={c.get('exploit_verified',False)} | platform={c.get('exploit_platform','')} | risk={c.get('risk_score',0):.1f}/10"
+            for c in exp_cves
+        )
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_exploit_detail(exp_cves, message)
+
+    # ── cvss_filter_query ──
+    elif intent == "cvss_filter_query":
+        q_lower = message.lower()
+        av = "Network" if any(w in q_lower for w in ["remote", "network", "internet"]) else ""
+        pr = "None" if any(w in q_lower for w in ["no auth", "unauthenticated", "no login"]) else ""
+        ui = "None" if any(w in q_lower for w in ["no interaction", "no user", "zero-click", "wormable"]) else ""
+        cvss_cves = recommender.search_by_cvss(
+            attack_vector=av or "Network",
+            privileges_required=pr or "None",
+            user_interaction=ui,
+            limit=15,
+        )
+        related_cves = cvss_cves[:6]
+        sources = ["NVD CVE", "CVSS Vector", "Risk Scorer"]
+        context_text = (
+            f"CVEs matching CVSS filter (AV={av or 'Network'}, PR={pr or 'None'}, UI={ui or 'any'}):\n"
+            + "\n".join(
+                f"  {c['cve_id']}: CVSS {c.get('severity_score',0):.1f} | AV={c.get('attack_vector','')} PR={c.get('privileges_required','')} UI={c.get('user_interaction','')} | risk={c.get('risk_score',0):.1f}/10"
+                for c in cvss_cves
+            )
+        )
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_cvss_filter(cvss_cves)
 
     # ── open_project_question — flexible fallback for any other question ──
     else:

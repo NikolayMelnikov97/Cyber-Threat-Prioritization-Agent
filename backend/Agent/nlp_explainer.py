@@ -18,9 +18,26 @@ def explain(cve: dict) -> str:
     elif is_kev:
         parts.append("It is listed in the CISA Known Exploited Vulnerabilities catalog, meaning it is actively exploited in the wild.")
     elif has_exploit:
-        parts.append("A public exploit exists for this vulnerability, raising its real-world danger significantly.")
+        exploit_type = (cve.get("exploit_type") or "").strip()
+        exploit_verified = cve.get("exploit_verified", False)
+        exploit_desc = "A verified" if exploit_verified else "A public"
+        exploit_kind = f" {exploit_type}" if exploit_type else ""
+        parts.append(f"{exploit_desc}{exploit_kind} exploit exists for this vulnerability, raising its real-world danger significantly.")
     else:
         parts.append("No public exploit or KEV listing found at this time.")
+
+    epss = cve.get("epss_score", 0) or 0
+    epss_pct = cve.get("epss_percentile", 0) or 0
+    if epss > 0.1:
+        parts.append(f"EPSS score: {epss:.4f} ({epss_pct*100:.1f}th percentile) — this CVE has an above-average probability of being exploited in the next 30 days.")
+    elif epss > 0:
+        parts.append(f"EPSS score: {epss:.4f} ({epss_pct*100:.1f}th percentile).")
+
+    av = (cve.get("attack_vector") or "").strip()
+    pr = (cve.get("privileges_required") or "").strip()
+    ui = (cve.get("user_interaction") or "").strip()
+    if av == "Network" and pr == "None" and ui == "None":
+        parts.append("Attack profile: remotely exploitable over the network, requires no authentication and no user interaction — highest exploitability class.")
 
     if cwe and cwe != "UNKNOWN":
         parts.append(f"Weakness type: {cwe}.")

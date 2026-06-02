@@ -25,6 +25,21 @@ export interface CVE {
   dateAdded?: string;
   dueDate?: string;
   ransomware_campaign?: string;
+  epss_score?: number;
+  epss_percentile?: number;
+  exploit_type?: string;
+  exploit_verified?: boolean;
+  exploit_platform?: string;
+  attack_vector?: string;
+  attack_complexity?: string;
+  privileges_required?: string;
+  user_interaction?: string;
+  confidentiality?: string;
+  integrity?: string;
+  availability?: string;
+  cpe_vendors?: string;
+  cpe_products?: string;
+  mitre_techniques?: string;
 }
 
 export interface VendorItem {

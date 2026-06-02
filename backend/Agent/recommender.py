@@ -87,7 +87,24 @@ def search_by_vendor(vendor: str, limit: int = 20) -> list[dict]:
     mask = (
         _df["vendorProject"].str.lower().str.contains(q, na=False)
         | _df["product"].str.lower().str.contains(q, na=False)
+        | _df["cpe_vendors"].str.lower().str.contains(q, na=False)
+        | _df["cpe_products"].str.lower().str.contains(q, na=False)
     )
+    results = _df[mask].nlargest(limit, "risk_score")
+    return [_row_to_dict(row) for _, row in results.iterrows()]
+
+
+def search_by_cvss(attack_vector: str = "", privileges_required: str = "",
+                   user_interaction: str = "", limit: int = 20) -> list[dict]:
+    if _df is None:
+        return []
+    mask = pd.Series([True] * len(_df), index=_df.index)
+    if attack_vector:
+        mask &= _df["attack_vector"].str.lower() == attack_vector.lower()
+    if privileges_required:
+        mask &= _df["privileges_required"].str.lower() == privileges_required.lower()
+    if user_interaction:
+        mask &= _df["user_interaction"].str.lower() == user_interaction.lower()
     results = _df[mask].nlargest(limit, "risk_score")
     return [_row_to_dict(row) for _, row in results.iterrows()]
 
