@@ -22,6 +22,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <a href="/" className="rounded-lg px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
               Dashboard
             </a>
+            <a href="/environment" className="rounded-lg px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors">
+              My Environment
+            </a>
             <a href="/agent" className="rounded-lg px-3 py-1.5 text-sm bg-blue-700 text-white hover:bg-blue-600 transition-colors font-semibold">
               AI Agent
             </a>

@@ -50,7 +50,7 @@ export default async function CVEDetailPage({
       </div>
 
       {/* Risk score */}
-      <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-6 grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <div>
           <p className="text-xs text-zinc-500 mb-1">Risk Score</p>
           <div className="flex items-center gap-2">
@@ -73,6 +73,10 @@ export default async function CVEDetailPage({
         <div>
           <p className="text-xs text-zinc-500 mb-1">Cluster</p>
           <span className="text-sm text-zinc-300">{cve!.cluster_label || "—"}</span>
+        </div>
+        <div>
+          <p className="text-xs text-zinc-500 mb-1">Published</p>
+          <span className="text-sm text-zinc-300">{cve!.published?.slice(0, 10) ?? "—"}</span>
         </div>
       </div>
 
@@ -97,6 +101,46 @@ export default async function CVEDetailPage({
             📋 CISA Required Action
           </h2>
           <p className="text-sm text-zinc-200 leading-relaxed">{cve!.requiredAction}</p>
+        </div>
+      )}
+
+      {/* KEV Details panel */}
+      {cve!.is_kev && (cve!.vendorProject || cve!.dateAdded || cve!.dueDate) && (
+        <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-5">
+          <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-3">
+            🏢 KEV Details
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {cve!.vendorProject && (
+              <div>
+                <p className="text-xs text-zinc-500 mb-1">Vendor</p>
+                <span className="text-sm text-zinc-200">{cve!.vendorProject}</span>
+              </div>
+            )}
+            {cve!.product && (
+              <div>
+                <p className="text-xs text-zinc-500 mb-1">Product</p>
+                <span className="text-sm text-zinc-200">{cve!.product}</span>
+              </div>
+            )}
+            {cve!.dateAdded && (
+              <div>
+                <p className="text-xs text-zinc-500 mb-1">Added to KEV</p>
+                <span className="text-sm text-zinc-200">{cve!.dateAdded.slice(0, 10)}</span>
+              </div>
+            )}
+            {cve!.dueDate && (
+              <div>
+                <p className="text-xs text-zinc-500 mb-1">CISA Patch Due</p>
+                <span className="text-sm font-bold text-red-300">{cve!.dueDate.slice(0, 10)}</span>
+              </div>
+            )}
+          </div>
+          {cve!.ransomware_campaign === "Known" && (
+            <div className="mt-3 rounded-lg bg-yellow-900/30 border border-yellow-700 px-4 py-2 text-sm text-yellow-300 font-semibold">
+              ⚠️ Associated with known ransomware campaigns (CISA confirmed)
+            </div>
+          )}
         </div>
       )}
 

@@ -18,7 +18,12 @@ export default function CVECard({
         <span className="font-mono text-sm font-bold text-blue-400">
           {cve.cve_id}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {cve.ransomware_campaign === "Known" && (
+            <span className="rounded bg-yellow-900 px-1.5 py-0.5 text-xs text-yellow-300 font-semibold">
+              RANSOM
+            </span>
+          )}
           {cve.is_kev && (
             <span className="rounded bg-red-900 px-1.5 py-0.5 text-xs text-red-300 font-semibold">
               KEV
@@ -37,10 +42,18 @@ export default function CVECard({
         {cve.description || "No description available."}
       </p>
 
-      <div className="mt-2 flex items-center gap-3 text-xs text-zinc-500">
+      <div className="mt-2 flex items-center gap-3 text-xs text-zinc-500 flex-wrap">
         {cve.cwe && cve.cwe !== "UNKNOWN" && <span>CWE: {cve.cwe}</span>}
         {cve.severity_score != null && (
           <span>CVSS: {cve.severity_score.toFixed(1)}</span>
+        )}
+        {cve.vendorProject && (
+          <span className="rounded bg-zinc-700 px-1.5 py-0.5 text-zinc-300">
+            {cve.vendorProject}
+          </span>
+        )}
+        {cve.published && (
+          <span className="ml-auto text-zinc-600">{cve.published.slice(0, 10)}</span>
         )}
         {showSimilarity && cve.similarity_score != null && (
           <span className="text-blue-400">

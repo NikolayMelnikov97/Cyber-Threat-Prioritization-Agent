@@ -1,6 +1,7 @@
 import re
 from Agent import recommender, llm_client
 from Agent.nlp_explainer import explain
+from Agent import threat_actors as ta_module
 
 # ── Intent detection ────────────────────────────────────────────────────────
 
@@ -13,13 +14,22 @@ _INTENT_PATTERNS = [
     ("exploit_query",      re.compile(r"\bexploit|\bpoc\b|\bproof.of.concept", re.I)),
     ("anomaly_query",      re.compile(r"\banomal|\bunusual|\boutlier|\bstrange|\bflagged", re.I)),
     ("open_project_question", re.compile(r"\b(presentation|assignment|project|limitation|how (does|do|is|are) (this|the|it|your)|what (is|are) (this|the project)|teach|course|workshop|explain (the |this )?(system|architecture|algorithm|model|approach|method|technique))\b", re.I)),
-    ("summary_query",      re.compile(r"\b(summar|overview|landscape|dataset|overall|big picture|report)\b", re.I)),
-    ("top_risks",          re.compile(r"\b(top|highest|most critical|biggest|worst|focus|priority|today)\b", re.I)),
-    ("recommendation_query", re.compile(r"\b(recommend|what should|next step|action|patch|mitigat|response|fix|remediat)\b", re.I)),
-    ("search_query",       re.compile(r"\b(search|find|look for|vulnerabilit(y|ies) (with|about|related))\b", re.I)),
+    ("system_query",       re.compile(r"\b(affect(s|ing)?|vulnerabilit(y|ies) (for|in|on|affecting))\b|\b(apache|nginx|tomcat|spring|log4j|windows|linux|android|macos|ubuntu|debian|iis|active directory|exchange server|cisco|fortinet|ivanti|citrix|vmware|juniper|palo alto|solarwinds|atlassian|zoho|okta|sharepoint|office 365|exchange|kubernetes|docker)\b", re.I)),
+    ("ransomware_query",   re.compile(r"\b(ransomware|ransom(ware)?|lockbit|blackcat|clop|alphv|ryuk|encrypt(ed|ion) attack)\b", re.I)),
+    ("threat_actor_query", re.compile(r"\b(apt|threat actor|hacker(s)?|cyber group|gang|group(s)?|nation.?state|lazarus|fancy bear|cozy bear|sandworm|volt typhoon|salt typhoon|fin7|clop|lockbit|blackcat|scattered spider|alphv|apt28|apt29|apt40|apt41|apt1|muddywater|who (is|are) (behind|targeting|attacking)|which group|targeting \w+)\b", re.I)),
+    ("latest_query",       re.compile(r"\b(latest|newest|recent|new(est)?|just (published|added|disclosed)|today'?s? (cve|vuln)|new attack|any new)\b", re.I)),
+    ("summary_query",      re.compile(r"\b(summar|overview|landscape|dataset|overall|big picture|report|happening|cybersecurity|cyber security)\b", re.I)),
+    ("top_risks",          re.compile(r"\b(top|highest|most critical|biggest|worst|focus|priority|today|critical vulnerabilit|dangerous|severe|urgent|which.*critical|which.*vulnerabilit)\b", re.I)),
+    ("recommendation_query", re.compile(r"\b(recommend|what should|next step|action|patch|mitigat|response|fix|remediat|worried about|should i)\b", re.I)),
+    ("environment_query",  re.compile(r"\b(my environment|my stack|my system|my infrastructure|threats? (on|to|for|in) my|current threats?|what.*(affect|target|attack).*my|relevant.*my|my.*exposure)\b", re.I)),
+    ("search_query",       re.compile(r"\b(search|find|look for|show me|list.*cve|vulnerabilit(y|ies) (with|about|related))\b", re.I)),
 ]
 
-_CVE_AGNOSTIC_INTENTS = {"top_risks", "recommendation_query", "summary_query", "search_query"}
+_CVE_AGNOSTIC_INTENTS = {
+    "top_risks", "recommendation_query", "summary_query", "search_query",
+    "latest_query", "system_query", "ransomware_query", "threat_actor_query",
+    "environment_query",
+}
 
 
 def detect_intent(message: str) -> str:
@@ -149,6 +159,10 @@ AGENT CAPABILITIES (what users can ask):
   - Keyword or CVE ID search
   - Threat landscape summary
   - Analyst remediation recommendations
+  - Latest CVEs sorted by publication date
+  - System-specific vulnerabilities (e.g. "what CVEs affect Apache?")
+  - CVEs associated with ransomware campaigns
+  - Threat actor profiles (APT groups, ransomware gangs, nation-state actors)
 
 ARCHITECTURE:
   User question → Intent detection (regex) → Tool selection (ML modules) →
@@ -185,6 +199,17 @@ def _cve_context(cve: dict) -> str:
         f"References: {cve.get('references_count', 0)}",
         f"Description: {(cve.get('description') or '')[:400]}",
     ]
+    if cve.get("vendorProject"):
+        vendor_str = cve["vendorProject"]
+        if cve.get("product"):
+            vendor_str += f" / {cve['product']}"
+        lines.append(f"Vendor/Product: {vendor_str}")
+    if cve.get("dateAdded"):
+        lines.append(f"KEV Date Added: {str(cve['dateAdded'])[:10]}")
+    if cve.get("dueDate"):
+        lines.append(f"CISA Patch Due: {str(cve['dueDate'])[:10]}")
+    if (cve.get("ransomware_campaign") or "").strip() == "Known":
+        lines.append("RANSOMWARE: Confirmed use in ransomware campaigns (CISA)")
     if cve.get("requiredAction"):
         lines.append(f"CISA Required Action: {cve['requiredAction']}")
     rce = _rce_advice(cve.get("description", ""))
@@ -201,6 +226,13 @@ def _brief_cve(c: dict) -> str:
     exp = " [EXPLOIT]" if c.get("has_exploit") else ""
     ano = " [ANOMALY]" if c.get("is_anomaly") else ""
     return f"  {c['cve_id']}: risk {c.get('risk_score',0):.1f}/10 ({c.get('risk_label','?')}){kev}{exp}{ano} — {(c.get('description') or '')[:120]}"
+
+
+def _brief_cve_vendor(c: dict) -> str:
+    kev = " [KEV]" if c.get("is_kev") else ""
+    exp = " [EXPLOIT]" if c.get("has_exploit") else ""
+    vendor = f" [{c.get('vendorProject','')}]" if c.get("vendorProject") else ""
+    return f"  {c['cve_id']}{vendor}: risk {c.get('risk_score',0):.1f}/10{kev}{exp} — {(c.get('description') or '')[:100]}"
 
 
 # ── Offline (template) response builders ─────────────────────────────────────
@@ -277,6 +309,91 @@ def _offline_summary(stats: dict, top: list[dict]) -> str:
     )
 
 
+def _offline_latest(cves: list[dict]) -> str:
+    lines = ["Here are the most recently published vulnerabilities in the dataset:\n"]
+    for i, c in enumerate(cves[:10], 1):
+        pub = (c.get("published") or "")[:10]
+        kev = " [KEV]" if c.get("is_kev") else ""
+        exp = " [EXPLOIT]" if c.get("has_exploit") else ""
+        lines.append(f"{i}. {c['cve_id']} — Published: {pub} | Risk: {c.get('risk_score',0):.1f}/10 ({c.get('risk_label','?')}){kev}{exp}")
+        lines.append(f"   {(c.get('description') or '')[:150]}")
+    lines.append("\nNote: newer CVEs are not necessarily higher risk — cross-check with KEV status and exploit availability before prioritising.")
+    return "\n".join(lines)
+
+
+def _offline_system_query(vendor: str, cves: list[dict]) -> str:
+    if not cves:
+        return f"No CVEs found matching '{vendor}' in the current dataset. This vendor may not appear in the CISA KEV catalog or the NVD window."
+    lines = [f"Vulnerabilities affecting {vendor} (sorted by risk score):\n"]
+    for c in cves[:8]:
+        kev = " [KEV]" if c.get("is_kev") else ""
+        exp = " [EXPLOIT]" if c.get("has_exploit") else ""
+        lines.append(f"  • {c['cve_id']}: Risk {c.get('risk_score',0):.1f}/10{kev}{exp} — {(c.get('description') or '')[:150]}")
+    lines.append("\nFocus on KEV-listed and exploit-confirmed CVEs for this vendor first.")
+    return "\n".join(lines)
+
+
+def _offline_ransomware(cves: list[dict]) -> str:
+    if not cves:
+        return "No CVEs with confirmed ransomware campaign association were found in the current dataset."
+    lines = [f"The following {len(cves)} CVEs are associated with known ransomware campaigns (per CISA KEV):\n"]
+    for c in cves[:10]:
+        vendor = c.get("vendorProject") or ""
+        vendor_str = f" [{vendor}]" if vendor else ""
+        lines.append(f"  • {c['cve_id']}{vendor_str} — Risk {c.get('risk_score',0):.1f}/10 — {(c.get('description') or '')[:120]}")
+        if c.get("dueDate"):
+            lines.append(f"    CISA Patch Due: {str(c['dueDate'])[:10]}")
+    lines.append("\nCVEs associated with ransomware campaigns are the highest-priority patching targets — these are actively used for financially motivated attacks.")
+    return "\n".join(lines)
+
+
+def _offline_environment(vendors: list[str], actors: list[dict], cves: list[dict]) -> str:
+    if not vendors:
+        return (
+            "Your environment is not configured yet. "
+            "Go to the 'My Environment' page and select the vendors/products you use. "
+            "The agent will then show you which threat actors target your stack and which CVEs are relevant."
+        )
+    lines = [f"Threat assessment for your environment ({', '.join(vendors)}):\n"]
+    if actors:
+        lines.append(f"THREAT ACTORS TARGETING YOUR STACK ({len(actors)} groups):")
+        for ta in actors[:5]:
+            matched = ta.get("matched_vendors", [])
+            lines.append(f"  • {ta['name']} ({ta['country']}) — targets {', '.join(matched)}")
+            lines.append(f"    {ta['description'][:120]}")
+        lines.append("")
+    else:
+        lines.append("No known threat actors specifically target your selected vendors.\n")
+    if cves:
+        lines.append(f"TOP RELEVANT CVEs FOR YOUR ENVIRONMENT ({len(cves)} found):")
+        for c in cves[:6]:
+            kev = " [KEV]" if c.get("is_kev") else ""
+            exp = " [EXPLOIT]" if c.get("has_exploit") else ""
+            lines.append(f"  • {c['cve_id']}: Risk {c.get('risk_score',0):.1f}/10{kev}{exp} — {(c.get('description') or '')[:120]}")
+    else:
+        lines.append("No specific CVEs found for your vendors in the current dataset.")
+    lines.append("\nFor full details, visit the 'My Environment' page.")
+    return "\n".join(lines)
+
+
+def _offline_threat_actor(actors: list[dict]) -> str:
+    if not actors:
+        return "No matching threat actor found. Try asking about APT28, APT29, Lazarus Group, LockBit, Volt Typhoon, Scattered Spider, or similar groups."
+    lines = []
+    for ta in actors[:2]:
+        aliases_str = ", ".join(ta["aliases"][:3])
+        lines.append(f"THREAT ACTOR: {ta['name']} (also known as: {aliases_str})")
+        lines.append(f"Origin: {ta['country']} | MITRE ATT&CK ID: {ta.get('mitre_id','N/A')}")
+        lines.append(f"Profile: {ta['description']}")
+        lines.append(f"Primary targets: {', '.join(ta['target_sectors'][:5])}")
+        lines.append(f"Known to target: {', '.join(ta['target_vendors'][:6])}")
+        lines.append(f"Notable campaigns: {', '.join(ta['notable_campaigns'][:3])}")
+        if ta.get("matched_vendors"):
+            lines.append(f"RELEVANCE: This group targets {', '.join(ta['matched_vendors'])} which are in your environment.")
+        lines.append("")
+    return "\n".join(lines)
+
+
 def _offline_open_question() -> str:
     df = recommender._df
     total = len(df) if df is not None else 0
@@ -317,9 +434,10 @@ Answer based strictly on the project information provided above.
 
 # ── Main agent function ───────────────────────────────────────────────────────
 
-def handle(message: str) -> dict:
+def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
     intent = detect_intent(message)
     cve_ids = [m.upper() for m in _CVE_RE.findall(message)]
+    env_vendors: list[str] = environment_vendors or []
     related_cves: list[dict] = []
     sources: list[str] = []
     context_text = ""
@@ -475,6 +593,114 @@ def handle(message: str) -> dict:
                 f"Found {len(results)} CVEs matching '{keywords}':\n\n" +
                 "\n".join(f"  • {c['cve_id']} — Risk {c.get('risk_score',0):.1f}/10 ({c.get('risk_label','?')}) — {(c.get('description') or '')[:150]}" for c in results)
             )
+
+    # ── environment_query ──
+    elif intent == "environment_query":
+        relevant_actors = ta_module.get_relevant_for_vendors(env_vendors) if env_vendors else []
+        seen_ids: set[str] = set()
+        env_cves: list[dict] = []
+        for vendor in env_vendors:
+            for c in recommender.search_by_vendor(vendor, limit=5):
+                if c["cve_id"] not in seen_ids:
+                    seen_ids.add(c["cve_id"])
+                    env_cves.append(c)
+        env_cves.sort(key=lambda x: x.get("risk_score", 0), reverse=True)
+        related_cves = env_cves[:6]
+        sources = ["Threat Actor Database", "CISA KEV", "NVD CVE", "Risk Scorer"]
+        vendor_str = ", ".join(env_vendors) if env_vendors else "none configured"
+        actor_ctx = "\n".join(
+            f"  - {ta['name']} ({ta['country']}): targets {', '.join(ta.get('matched_vendors', []))}"
+            for ta in relevant_actors[:5]
+        ) or "  None identified for your stack."
+        cve_ctx = "\n".join(_brief_cve_vendor(c) for c in env_cves[:8]) or "  No CVEs found."
+        context_text = (
+            f"USER ENVIRONMENT: {vendor_str}\n\n"
+            f"THREAT ACTORS TARGETING THIS ENVIRONMENT:\n{actor_ctx}\n\n"
+            f"TOP CVEs RELEVANT TO THIS ENVIRONMENT:\n{cve_ctx}"
+        )
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_environment(env_vendors, relevant_actors, env_cves)
+
+    # ── latest_query ──
+    elif intent == "latest_query":
+        latest = recommender.get_latest(15)
+        related_cves = latest[:6]
+        sources = ["NVD CVE", "Risk Scorer"]
+        context_text = "LATEST PUBLISHED CVEs (by date):\n" + "\n".join(_brief_cve(c) for c in latest)
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_latest(latest)
+
+    # ── system_query ──
+    elif intent == "system_query":
+        vendor_extract = re.sub(
+            r"\b(what|which|show|list|find|are|there|any|cves?|vulnerabilit(y|ies)|affecting|affect|for|in|on|targeting|target|about)\b",
+            "", message, flags=re.I,
+        ).strip(" ?.,")
+        vendor_extract = vendor_extract.strip() or message.strip()
+        results = recommender.search_by_vendor(vendor_extract, limit=15)
+        if not results:
+            results = recommender.search_cves(vendor_extract, limit=15)
+        related_cves = results[:6]
+        sources = ["CISA KEV", "NVD CVE", "Risk Scorer"]
+        context_text = f"CVEs affecting '{vendor_extract}':\n" + "\n".join(_brief_cve_vendor(c) for c in results)
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_system_query(vendor_extract, results)
+
+    # ── ransomware_query ──
+    elif intent == "ransomware_query":
+        df = recommender._df
+        ransomware_cves: list[dict] = []
+        if df is not None:
+            ransomware_rows = df[df["ransomware_campaign"] == "Known"].nlargest(15, "risk_score")
+            ransomware_cves = [recommender._row_to_dict(row) for _, row in ransomware_rows.iterrows()]
+        related_cves = ransomware_cves[:6]
+        sources = ["CISA KEV", "NVD CVE", "Risk Scorer"]
+        context_text = f"CVEs with known ransomware campaign use ({len(ransomware_cves)} found):\n" + "\n".join(_brief_cve_vendor(c) for c in ransomware_cves)
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_ransomware(ransomware_cves)
+
+    # ── threat_actor_query ──
+    elif intent == "threat_actor_query":
+        msg_lower = message.lower()
+        actors = [
+            ta for ta in ta_module.get_all()
+            if any(alias.lower() in msg_lower for alias in [ta["name"]] + ta.get("aliases", []))
+        ]
+        if not actors:
+            actors = ta_module.get_all()[:5]
+        actor_vendors: list[str] = []
+        for ta in actors[:2]:
+            actor_vendors.extend(ta.get("target_vendors", []))
+        seen_ids: set[str] = set()
+        unique_cves: list[dict] = []
+        for vendor in set(actor_vendors):
+            for c in recommender.search_by_vendor(vendor, limit=3):
+                if c["cve_id"] not in seen_ids:
+                    seen_ids.add(c["cve_id"])
+                    unique_cves.append(c)
+        unique_cves.sort(key=lambda x: x.get("risk_score", 0), reverse=True)
+        related_cves = unique_cves[:6]
+        sources = ["Threat Actor Database", "CISA KEV", "NVD CVE", "Risk Scorer"]
+        actor_ctx = "\n\n".join(
+            f"ACTOR: {ta['name']} ({ta['country']})\nTargets: {', '.join(ta['target_vendors'])}\nCampaigns: {', '.join(ta['notable_campaigns'][:2])}"
+            for ta in actors[:2]
+        )
+        context_text = (
+            f"THREAT ACTOR INTELLIGENCE:\n{actor_ctx}\n\n"
+            f"RELEVANT CVEs IN DATASET:\n" + "\n".join(_brief_cve_vendor(c) for c in unique_cves[:8])
+        )
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_threat_actor(actors)
 
     # ── open_project_question — flexible fallback for any other question ──
     else:

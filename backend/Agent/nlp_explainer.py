@@ -43,4 +43,17 @@ def explain(cve: dict) -> str:
     else:
         parts.append("Recommended action: Apply patch in the next maintenance window.")
 
+    vendor = (cve.get("vendorProject") or "").strip()
+    product = (cve.get("product") or "").strip()
+    if vendor and risk_label in ("Critical", "High"):
+        target_str = f"{vendor} / {product}" if product else vendor
+        parts.append(f"Affected vendor/product: {target_str}.")
+
+    due = (cve.get("dueDate") or "").strip()
+    if due and is_kev:
+        parts.append(f"CISA mandatory patch deadline: {due[:10]}.")
+
+    if (cve.get("ransomware_campaign") or "").strip() == "Known":
+        parts.append("WARNING: This CVE has been associated with known ransomware campaigns — treat as highest priority regardless of CVSS score.")
+
     return " ".join(parts)

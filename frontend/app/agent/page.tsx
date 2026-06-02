@@ -6,14 +6,16 @@ import { chatWithAgent, type CVE, type ChatResponse } from "@/lib/api";
 import RiskBadge from "@/components/RiskBadge";
 
 const EXAMPLE_PROMPTS = [
+  "What are the current threats on my environment?",
   "What are the top threats I should focus on today?",
-  "Summarize the threat landscape",
+  "Show me the latest CVEs published recently",
+  "What CVEs affect Apache?",
+  "Which CVEs have been used in ransomware attacks?",
+  "Tell me about APT28 and what systems they target",
+  "What do we know about Lazarus Group?",
   "Which CVEs are in the CISA KEV catalog?",
-  "Which vulnerabilities have public exploits?",
   "What anomalies did the model detect?",
-  "What should a SOC analyst do next?",
-  "How does the risk score work?",
-  "How is this different from a simple CVE database?",
+  "What should a SOC analyst patch first today?",
 ];
 
 interface Message {
@@ -22,6 +24,33 @@ interface Message {
   text: string;
   data?: ChatResponse;
   loading?: boolean;
+}
+
+function AgentText({ text }: { text: string }) {
+  const paragraphs = text.split(/\n\n+/);
+  return (
+    <div className="text-sm text-zinc-200 leading-relaxed space-y-3">
+      {paragraphs.map((para, i) => {
+        const lines = para.split("\n").filter((l) => l.trim());
+        const isList = lines.length > 1 && lines.every((l) =>
+          /^\s*[•\-\*]/.test(l) || /^\s*\d+[.)]\s/.test(l)
+        );
+        if (isList) {
+          return (
+            <ul key={i} className="space-y-1.5 pl-1">
+              {lines.map((l, j) => (
+                <li key={j} className="flex gap-2">
+                  <span className="text-blue-400 flex-shrink-0 mt-0.5">•</span>
+                  <span>{l.replace(/^\s*[•\-\*]\s*/, "").replace(/^\s*\d+[.)]\s*/, "")}</span>
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        return <p key={i} className="whitespace-pre-wrap">{para}</p>;
+      })}
+    </div>
+  );
 }
 
 function IntentBadge({ intent }: { intent: string }) {
@@ -36,6 +65,11 @@ function IntentBadge({ intent }: { intent: string }) {
     search_query: "Search",
     summary_query: "Summary",
     open_project_question: "Project Q&A",
+    latest_query: "Latest CVEs",
+    system_query: "System Query",
+    ransomware_query: "Ransomware Intel",
+    threat_actor_query: "Threat Actor Intel",
+    environment_query: "My Environment",
     general_help: "Help",
   };
   return (
@@ -113,7 +147,7 @@ function AgentBubble({ msg }: { msg: Message }) {
               )}
             </div>
           )}
-          <div className="text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap">{msg.text}</div>
+          <AgentText text={msg.text} />
 
           {data?.sources && data.sources.length > 0 && (
             <div className="mt-3 pt-3 border-t border-zinc-700">
@@ -146,9 +180,17 @@ export default function AgentPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [envVendors, setEnvVendors] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   let msgCounter = useRef(0);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("user_environment_vendors");
+      if (stored) setEnvVendors(JSON.parse(stored));
+    } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -174,7 +216,7 @@ export default function AgentPage() {
     const agentId = addMessage({ role: "agent", text: "", loading: true });
 
     try {
-      const result = await chatWithAgent(userText);
+      const result = await chatWithAgent(userText, envVendors);
       updateMessage(agentId, { text: result.answer, data: result, loading: false });
     } catch (e: unknown) {
       const err = e instanceof Error ? e.message : "Connection error — is the backend running?";
@@ -198,6 +240,16 @@ export default function AgentPage() {
         <div>
           <h1 className="text-xl font-bold">AI Threat Agent</h1>
           <p className="text-xs text-zinc-500">Conversational cyber threat intelligence — powered by ML + Gemini</p>
+          {envVendors.length > 0 && (
+            <p className="text-xs text-blue-400 mt-1">
+              Environment: {envVendors.join(", ")}
+            </p>
+          )}
+          {envVendors.length === 0 && (
+            <Link href="/environment" className="text-xs text-zinc-600 hover:text-zinc-400 mt-1 block">
+              Set up My Environment →
+            </Link>
+          )}
         </div>
         <Link href="/" className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded-lg">
           ← Dashboard

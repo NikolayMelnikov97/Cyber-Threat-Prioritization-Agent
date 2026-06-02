@@ -11,6 +11,7 @@ from Agent import recommender
 from Agent.nlp_explainer import explain
 from Agent import chat_agent
 from Agent import llm_client
+from Agent import threat_actors as ta_module
 
 
 @asynccontextmanager
@@ -70,14 +71,32 @@ def search(q: str = Query(..., min_length=1)):
     return results
 
 
+@app.get("/latest-cves")
+def latest_cves(n: int = Query(default=20, ge=1, le=100)):
+    return recommender.get_latest(n)
+
+
+@app.get("/vendors")
+def get_vendors():
+    return recommender.get_vendors()
+
+
+@app.get("/threat-actors")
+def get_threat_actors(vendor: str | None = Query(default=None)):
+    if vendor:
+        return ta_module.get_by_vendor(vendor)
+    return ta_module.get_all()
+
+
 class ChatRequest(BaseModel):
     message: str
+    environment_vendors: list[str] = []
 
 
 @app.post("/agent/chat")
 def agent_chat(req: ChatRequest):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
-    result = chat_agent.handle(req.message.strip())
+    result = chat_agent.handle(req.message.strip(), environment_vendors=req.environment_vendors)
     result["gemini_enabled"] = llm_client.is_enabled()
     return result

@@ -34,13 +34,21 @@ def load_data(force_rebuild: bool = False) -> pd.DataFrame:
     nvd["is_kev"] = nvd["cve_id"].isin(kev_ids)
     nvd["has_exploit"] = nvd["cve_id"].isin(exploit_ids)
 
-    kev_meta = kev[["cve_id", "requiredAction", "vulnerabilityName"]].drop_duplicates("cve_id")
+    kev_meta = kev[[
+        "cve_id", "vendorProject", "product", "vulnerabilityName",
+        "dateAdded", "dueDate", "requiredAction", "knownRansomwareCampaignUse",
+    ]].drop_duplicates("cve_id").rename(columns={"knownRansomwareCampaignUse": "ransomware_campaign"})
     df = nvd.merge(kev_meta, on="cve_id", how="left")
 
     df["description"] = df["description"].fillna("")
     df["severity_score"] = pd.to_numeric(df["severity_score"], errors="coerce").fillna(0.0)
     df["references_count"] = pd.to_numeric(df["references_count"], errors="coerce").fillna(0.0)
     df["cwe"] = df["cwe"].fillna("UNKNOWN")
+    df["vendorProject"] = df["vendorProject"].fillna("")
+    df["product"] = df["product"].fillna("")
+    df["dateAdded"] = df["dateAdded"].fillna("")
+    df["dueDate"] = df["dueDate"].fillna("")
+    df["ransomware_campaign"] = df["ransomware_campaign"].fillna("")
 
     df.to_csv(ENRICHED_PATH, index=False)
     print(f"[data_loader] Enriched dataset saved: {df.shape[0]} rows")

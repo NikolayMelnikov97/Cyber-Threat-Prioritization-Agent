@@ -18,12 +18,19 @@ node_modules/
 frontend/node_modules/
 frontend/.next/
 
-# Data
+# Data — generated/large files
 backend/Data/enterprise-attack.json
 Data/enterprise-attack.json
 backend/Data/enriched_cves.csv
 Data/enriched_cves.csv
 Data/Data/
+
+# Docs — zip submissions and macOS junk
+docs/*.zip
+docs/DS_Store
+
+# Claude Code settings and plans
+.claude/
 
 # Local folders
 Archive/
@@ -31,3 +38,4 @@ Archive/
 
 # macOS
 .DS_Store
+**/.DS_Store

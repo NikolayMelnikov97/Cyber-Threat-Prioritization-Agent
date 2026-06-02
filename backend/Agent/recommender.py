@@ -73,6 +73,36 @@ def search_cves(query: str, limit: int = 20) -> list[dict]:
     return [_row_to_dict(row) for _, row in results.iterrows()]
 
 
+def get_latest(n: int = 20) -> list[dict]:
+    if _df is None:
+        return []
+    sorted_df = _df.sort_values("published", ascending=False)
+    return [_row_to_dict(row) for _, row in sorted_df.head(n).iterrows()]
+
+
+def search_by_vendor(vendor: str, limit: int = 20) -> list[dict]:
+    if _df is None:
+        return []
+    q = vendor.strip().lower()
+    mask = (
+        _df["vendorProject"].str.lower().str.contains(q, na=False)
+        | _df["product"].str.lower().str.contains(q, na=False)
+    )
+    results = _df[mask].nlargest(limit, "risk_score")
+    return [_row_to_dict(row) for _, row in results.iterrows()]
+
+
+def get_vendors() -> list[dict]:
+    if _df is None:
+        return []
+    kev_rows = _df[_df["is_kev"] == True][["vendorProject", "product"]].drop_duplicates()
+    kev_rows = kev_rows[kev_rows["vendorProject"] != ""]
+    return sorted(
+        [{"vendor": r["vendorProject"], "product": r["product"]} for _, r in kev_rows.iterrows()],
+        key=lambda x: x["vendor"].lower(),
+    )
+
+
 def _row_to_dict(row) -> dict:
     def safe(v):
         if isinstance(v, float) and np.isnan(v):
