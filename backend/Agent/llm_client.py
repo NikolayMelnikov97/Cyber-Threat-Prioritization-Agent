@@ -1,4 +1,9 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load backend/.env if it exists (no-op if the file is absent)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 _model = None
 _enabled = False
