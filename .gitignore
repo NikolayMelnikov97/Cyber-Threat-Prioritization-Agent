@@ -23,9 +23,8 @@ backend/Data/enterprise-attack.json
 backend/Data/enriched_cves.csv
 Data/
 
-# Docs — zip submissions and macOS junk
-docs/*.zip
-docs/DS_Store
+# Docs — local only
+docs/
 
 # Claude Code — local only, never commit
 .claude/
