@@ -29,8 +29,9 @@ Data/Data/
 docs/*.zip
 docs/DS_Store
 
-# Claude Code settings and plans
+# Claude Code — local only, never commit
 .claude/
+CLAUDE.md
 
 # Local folders
 Archive/
