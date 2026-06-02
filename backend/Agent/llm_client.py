@@ -2,10 +2,11 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load backend/.env if it exists (no-op if the file is absent)
+# Load backend/.env if it exists (no-op when absent)
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-_model = None
+_client = None
+_model_name: str = ""
 _enabled = False
 
 SYSTEM_PROMPT = """You are an expert cybersecurity analyst and SOC (Security Operations Center) assistant.
@@ -30,17 +31,17 @@ When CVE data is provided, always reference:
 
 
 def _init():
-    global _model, _enabled
+    global _client, _model_name, _enabled
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         print("[llm_client] No GEMINI_API_KEY — offline template mode")
         return
+    _model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite").strip()
     try:
-        import google.generativeai as genai  # type: ignore
-        genai.configure(api_key=api_key)
-        _model = genai.GenerativeModel("gemini-1.5-flash")
+        from google import genai  # type: ignore
+        _client = genai.Client(api_key=api_key)
         _enabled = True
-        print("[llm_client] Gemini 1.5 Flash initialized")
+        print(f"[llm_client] Gemini initialized with model {_model_name}")
     except Exception as e:
         print(f"[llm_client] Gemini init failed: {e}")
 
@@ -53,9 +54,9 @@ def is_enabled() -> bool:
 
 
 def generate(context: str, question: str) -> str:
-    if _enabled and _model is not None:
+    if _enabled and _client is not None:
         return _call_gemini(context, question)
-    return context  # offline: chat_agent builds the template response directly
+    return context  # offline: chat_agent returns template response directly
 
 
 def _call_gemini(context: str, question: str) -> str:
@@ -66,8 +67,14 @@ def _call_gemini(context: str, question: str) -> str:
         f"Analyst question: {question}"
     )
     try:
-        response = _model.generate_content(prompt)
-        return response.text.strip()
+        response = _client.models.generate_content(
+            model=_model_name,
+            contents=prompt,
+        )
+        text = response.text
+        if not text:
+            raise ValueError("Empty response from Gemini")
+        return text.strip()
     except Exception as e:
         print(f"[llm_client] Gemini call failed: {e}")
         return context

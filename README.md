@@ -137,8 +137,10 @@ Supported intents: `top_risks`, `cve_explanation`, `similar_cves`, `kev_query`, 
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn main:app --reload
+uvicorn main:app --reload --reload-exclude "venv/*"
 ```
+
+> **Important:** always pass `--reload-exclude "venv/*"` when a virtual environment lives inside `backend/`. Without it, uvicorn watches every file inside `venv/site-packages/` and restarts the server in a continuous loop.
 
 The backend starts at `http://localhost:8000`. On first run, it:
 1. Merges NVD + KEV + Exploit-DB into an enriched dataset (~20 seconds)
@@ -149,13 +151,23 @@ API docs at `http://localhost:8000/docs`.
 
 ### 2. Gemini (Optional)
 
+Copy the example env file and add your key:
+
 ```bash
-# In the backend directory:
-export GEMINI_API_KEY="your-key-here"
-uvicorn main:app --reload
+cp backend/.env.example backend/.env
+# then edit backend/.env and set your real GEMINI_API_KEY
 ```
 
-Without `GEMINI_API_KEY`, the agent uses high-quality template-based responses (fully functional). With the key, responses are enhanced by Gemini 1.5 Flash.
+`backend/.env` is gitignored. Never commit it.
+
+Configurable variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GEMINI_API_KEY` | *(none)* | API key from [aistudio.google.com](https://aistudio.google.com) |
+| `GEMINI_MODEL` | `gemini-2.5-flash-lite` | Model name — change to any supported Gemini model |
+
+Without `GEMINI_API_KEY`, the agent uses high-quality template-based responses (fully functional). With the key, responses are enhanced by Gemini (`gemini-2.5-flash-lite` by default — the cheapest/fastest option).
 
 ### 3. Frontend
 
