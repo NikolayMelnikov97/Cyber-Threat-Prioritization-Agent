@@ -12,6 +12,7 @@ backend/venv/
 .env.local
 .env.*
 !.env.example
+!.env.local.example
 
 # Node
 node_modules/
@@ -21,7 +22,7 @@ frontend/.next/
 # Data — generated/large files and duplicate root folder
 backend/Data/enterprise-attack.json
 backend/Data/enriched_cves.csv
-Data/
+/Data/
 
 # Docs — local only
 docs/

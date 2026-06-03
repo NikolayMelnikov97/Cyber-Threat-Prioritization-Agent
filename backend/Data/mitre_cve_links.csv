@@ -1,0 +1,11 @@
+cve_id,technique_id,technique_name,tactic
+CVE-2019-3610,T1555.005,Password Managers,credential-access
+CVE-2014-7169,T1190,Exploit Public-Facing Application,initial-access
+CVE-2016-6662,T1190,Exploit Public-Facing Application,initial-access
+CVE-2017-0176,T1210,Exploitation of Remote Services,lateral-movement
+CVE-2014-7169,T1210,Exploitation of Remote Services,lateral-movement
+CVE-2016-6662,T1210,Exploitation of Remote Services,lateral-movement
+CVE-2024-55591,T1562.013,Disable or Modify Network Device Firewall,stealth
+CVE-2024-55591,T1686.002,Network Device Firewall,defense-impairment
+CVE-2017-8625,T1218.001,Compiled HTML File,stealth
+CVE-2017-8625,T1223,Compiled HTML File,"stealth,execution"
