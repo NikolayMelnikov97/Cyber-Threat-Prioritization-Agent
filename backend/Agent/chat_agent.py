@@ -18,8 +18,8 @@ _INTENT_PATTERNS = [
     ("anomaly_query",      re.compile(r"\banomal|\bunusual|\boutlier|\bstrange|\bflagged", re.I)),
     ("open_project_question", re.compile(r"\b(presentation|assignment|project|limitation|how (does|do|is|are) (this|the|it|your)|what (is|are) (this|the project)|teach|course|workshop|explain (the |this )?(system|architecture|algorithm|model|approach|method|technique))\b", re.I)),
     ("system_query",       re.compile(r"\b(affect(s|ing)?|vulnerabilit(y|ies) (for|in|on|affecting))\b|\b(apache|nginx|tomcat|spring|log4j|windows|linux|android|macos|ubuntu|debian|iis|active directory|exchange server|cisco|fortinet|ivanti|citrix|vmware|juniper|palo alto|solarwinds|atlassian|zoho|okta|sharepoint|office 365|exchange|kubernetes|docker)\b", re.I)),
-    ("ransomware_query",   re.compile(r"\b(ransomware|ransom(ware)?|lockbit|blackcat|clop|alphv|ryuk|encrypt(ed|ion) attack)\b", re.I)),
     ("threat_actor_query", re.compile(r"\b(apt|threat actor|hacker(s)?|cyber group|gang|group(s)?|nation.?state|lazarus|fancy bear|cozy bear|sandworm|volt typhoon|salt typhoon|fin7|clop|lockbit|blackcat|scattered spider|alphv|apt28|apt29|apt40|apt41|apt1|muddywater|who (is|are) (behind|targeting|attacking)|which group|targeting \w+)\b", re.I)),
+    ("ransomware_query",   re.compile(r"\b(ransomware|ransom(ware)?|lockbit|blackcat|clop|alphv|ryuk|encrypt(ed|ion) attack)\b", re.I)),
     ("latest_query",       re.compile(r"\b(latest|newest|recent|new(est)?|just (published|added|disclosed)|today'?s? (cve|vuln)|new attack|any new)\b", re.I)),
     ("summary_query",      re.compile(r"\b(summar|overview|landscape|dataset|overall|big picture|report|happening|cybersecurity|cyber security)\b", re.I)),
     ("top_risks",          re.compile(r"\b(top|highest|most critical|biggest|worst|focus|priority|today|critical vulnerabilit|dangerous|severe|urgent|which.*critical|which.*vulnerabilit)\b", re.I)),
@@ -27,6 +27,10 @@ _INTENT_PATTERNS = [
     ("environment_query",  re.compile(r"\b(my environment|my stack|my system|my infrastructure|threats? (on|to|for|in) my|current threats?|what.*(affect|target|attack).*my|relevant.*my|my.*exposure)\b", re.I)),
     ("search_query",       re.compile(r"\b(search|find|look for|show me|list.*cve|vulnerabilit(y|ies) (with|about|related))\b", re.I)),
 ]
+
+# NOTE: threat_actor_query is intentionally ordered before ransomware_query so that
+# queries naming a specific actor (LockBit, DarkSide, APT28) route to the actor
+# knowledge base rather than the generic ransomware CVE search.
 
 _CVE_AGNOSTIC_INTENTS = {
     "top_risks", "recommendation_query", "summary_query", "search_query",
@@ -492,21 +496,75 @@ Answer based strictly on the project information provided above.
 """
 
 
+# ── Scope detection ───────────────────────────────────────────────────────────
+
+_OUT_OF_SCOPE_RE = re.compile(
+    r"\b(recipe|cook(ing)?|chef|restaurant|food|pasta|pizza|burger|bake|baking|"
+    r"prime minister|president of|governor|senator|parliament|election|vote|ballot|"
+    r"football|soccer|basketball|baseball|tennis|golf|nfl|nba|fifa|cricket|rugby|"
+    r"weather forecast|horoscope|zodiac|astrology|"
+    r"stock (?:price|market)|buy shares|cryptocurrency price|bitcoin price|"
+    r"movie review|celebrity gossip|song lyrics|"
+    r"dating advice|relationship advice|breakup|"
+    r"math homework|what is \d+\s*[\+\-\*\/]\s*\d+)\b",
+    re.I,
+)
+
+
+def _is_in_scope(message: str) -> bool:
+    return not _OUT_OF_SCOPE_RE.search(message)
+
+
+def _out_of_scope_response() -> str:
+    return (
+        "That question is outside the scope of this system. "
+        "I'm a Cyber Threat Prioritization Agent focused exclusively on cybersecurity topics: "
+        "CVEs, CVSS, EPSS, CISA KEV, exploit intelligence, threat actors, ransomware groups, "
+        "SOC analysis, vulnerability remediation, and this project's architecture and methods.\n\n"
+        "Try asking:\n"
+        "  • What are the top CVEs I should focus on today?\n"
+        "  • Tell me about the LockBit ransomware group\n"
+        "  • Which CVEs are in the CISA KEV catalog?\n"
+        "  • Explain CVE-2025-1234\n"
+        "  • What anomalies did the model detect?"
+    )
+
+
+_GEMINI_GENERAL_LABEL = (
+    "⚠️ Note: This answer is based on general Gemini cybersecurity reasoning, "
+    "not on a matching record in the local project database.\n\n"
+)
+
+
 # ── Main agent function ───────────────────────────────────────────────────────
 
 def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
+    if not _is_in_scope(message):
+        return {
+            "answer": _out_of_scope_response(),
+            "intent": "out_of_scope",
+            "sources": [],
+            "related_cves": [],
+            "evidence_type": "OUT_OF_SCOPE",
+            "local_evidence_found": False,
+        }
+
     intent = detect_intent(message)
     cve_ids = [m.upper() for m in _CVE_RE.findall(message)]
     env_vendors: list[str] = environment_vendors or []
     related_cves: list[dict] = []
     sources: list[str] = []
     context_text = ""
+    evidence_type = "LOCAL_DB"
+    local_evidence_found = False
 
     # ── top_risks ──
     if intent == "top_risks":
         top = recommender.get_top_risks(10)
         related_cves = top
         sources = ["NVD CVE", "CISA KEV", "Exploit-DB", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(top)
         context_text = "TOP RISK CVEs:\n" + "\n".join(_brief_cve(c) for c in top)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -518,10 +576,26 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         cve_id = cve_ids[0]
         cve = recommender.get_profile(cve_id)
         if not cve:
-            return {"answer": f"I couldn't find {cve_id} in the dataset. It may be outside the current 20k CVE window.", "intent": intent, "sources": [], "related_cves": []}
+            if llm_client.is_enabled():
+                _general_ctx = (
+                    f"CVE ID: {cve_id}\n"
+                    f"Status: This CVE was NOT found in the local dataset (~20,000 recent CVEs from NVD).\n"
+                    f"Provide any general cybersecurity information you have about this CVE. "
+                    f"Be factual. Do not invent risk scores, KEV status, or exploitation details."
+                )
+                _ans = _GEMINI_GENERAL_LABEL + llm_client.generate(_general_ctx, message)
+            else:
+                _ans = (
+                    f"{cve_id} was not found in the local dataset (~20,000 recent NVD CVEs). "
+                    f"It may be outside the current data window. "
+                    f"Configure GEMINI_API_KEY to enable general cybersecurity reasoning about CVEs outside the local database."
+                )
+            return {"answer": _ans, "intent": intent, "sources": ["General Cybersecurity Knowledge"], "related_cves": [], "evidence_type": "GEMINI_GENERAL", "local_evidence_found": False}
         similar = recommender.get_similar(cve_id, top_n=5)
         related_cves = [cve] + similar[:3]
         sources = ["NVD CVE", "CISA KEV", "Exploit-DB", "TF-IDF Similarity", "Risk Scorer", "Anomaly Detector"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = True
         context_text = _cve_context(cve) + "\n\nTOP SIMILAR CVEs:\n" + "\n".join(_brief_cve(s) for s in similar[:3])
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -533,10 +607,12 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         cve_id = cve_ids[0]
         cve = recommender.get_profile(cve_id)
         if not cve:
-            return {"answer": f"I couldn't find {cve_id} in the dataset.", "intent": intent, "sources": [], "related_cves": []}
+            return {"answer": f"I couldn't find {cve_id} in the dataset.", "intent": intent, "sources": [], "related_cves": [], "evidence_type": "GEMINI_GENERAL", "local_evidence_found": False}
         similar = recommender.get_similar(cve_id, top_n=8)
         related_cves = similar
         sources = ["TF-IDF Cosine Similarity", "NVD CVE", "Risk Scorer"]
+        evidence_type = "ML_OUTPUT"
+        local_evidence_found = bool(similar)
         context_text = f"Finding similar CVEs to {cve_id}:\nTarget: {_cve_context(cve)}\n\nSIMILAR CVEs:\n" + "\n".join(_brief_cve(s) for s in similar)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -555,6 +631,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             kev_cves = [recommender._row_to_dict(row) for _, row in kev_rows.iterrows()]
         related_cves = kev_cves
         sources = ["CISA KEV", "NVD CVE", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(kev_cves)
         context_text = "CISA KEV CVEs in dataset:\n" + "\n".join(_brief_cve(c) for c in kev_cves)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -570,6 +648,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             exp_cves = [recommender._row_to_dict(row) for _, row in exp_rows.iterrows()]
         related_cves = exp_cves
         sources = ["Exploit-DB", "NVD CVE", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(exp_cves)
         context_text = "CVEs with public exploits:\n" + "\n".join(_brief_cve(c) for c in exp_cves)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -585,6 +665,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             ano_cves = [recommender._row_to_dict(row) for _, row in ano_rows.iterrows()]
         related_cves = ano_cves
         sources = ["Isolation Forest", "NVD CVE", "Risk Scorer"]
+        evidence_type = "ML_OUTPUT"
+        local_evidence_found = bool(ano_cves)
         context_text = f"Anomalous CVEs detected by Isolation Forest ({len(ano_cves)} shown):\n" + "\n".join(_brief_cve(c) for c in ano_cves)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -596,9 +678,11 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         cve_id = cve_ids[0]
         cve = recommender.get_profile(cve_id)
         if not cve:
-            return {"answer": f"I couldn't find {cve_id} in the dataset.", "intent": intent, "sources": [], "related_cves": []}
+            return {"answer": f"I couldn't find {cve_id} in the dataset.", "intent": intent, "sources": [], "related_cves": [], "evidence_type": "GEMINI_GENERAL", "local_evidence_found": False}
         related_cves = [cve]
         sources = ["NVD CVE", "CISA KEV", "Exploit-DB", "Anomaly Detector"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = True
         context_text = _cve_context(cve) + "\n\nTask: Generate specific, prioritised remediation recommendations for this CVE."
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -610,6 +694,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         top = recommender.get_top_risks(5)
         related_cves = top
         sources = ["Risk Scorer", "CISA KEV", "Exploit-DB", "Anomaly Detector"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(top)
         context_text = "TOP PRIORITY CVEs FOR REMEDIATION:\n" + "\n".join(_brief_cve(c) for c in top)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -633,6 +719,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         top = recommender.get_top_risks(5)
         related_cves = top
         sources = ["NVD CVE", "CISA KEV", "Exploit-DB", "Risk Scorer", "Isolation Forest", "K-Means Clustering"]
+        evidence_type = "ML_OUTPUT"
+        local_evidence_found = recommender._df is not None
         context_text = f"DATASET SUMMARY:\n{stats}\n\nTOP RISKS:\n" + "\n".join(_brief_cve(c) for c in top)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -645,6 +733,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         results = recommender.search_cves(keywords, limit=8)
         related_cves = results
         sources = ["NVD CVE", "TF-IDF Search"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(results)
         context_text = f"Search results for '{keywords}':\n" + "\n".join(_brief_cve(c) for c in results)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -667,6 +757,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         env_cves.sort(key=lambda x: x.get("risk_score", 0), reverse=True)
         related_cves = env_cves[:6]
         sources = ["Threat Actor Database", "CISA KEV", "NVD CVE", "Risk Scorer"]
+        evidence_type = "THREAT_ACTOR_KB" if relevant_actors else "LOCAL_DB"
+        local_evidence_found = bool(env_vendors and (relevant_actors or env_cves))
         vendor_str = ", ".join(env_vendors) if env_vendors else "none configured"
         actor_ctx = "\n".join(
             f"  - {ta['name']} ({ta['country']}): targets {', '.join(ta.get('matched_vendors', []))}"
@@ -688,6 +780,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         latest = recommender.get_latest(15)
         related_cves = latest[:6]
         sources = ["NVD CVE", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(latest)
         context_text = "LATEST PUBLISHED CVEs (by date):\n" + "\n".join(_brief_cve(c) for c in latest)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -706,6 +800,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             results = recommender.search_cves(vendor_extract, limit=15)
         related_cves = results[:6]
         sources = ["CISA KEV", "NVD CVE", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(results)
         context_text = f"CVEs affecting '{vendor_extract}':\n" + "\n".join(_brief_cve_vendor(c) for c in results)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -721,6 +817,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             ransomware_cves = [recommender._row_to_dict(row) for _, row in ransomware_rows.iterrows()]
         related_cves = ransomware_cves[:6]
         sources = ["CISA KEV", "NVD CVE", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(ransomware_cves)
         context_text = f"CVEs with known ransomware campaign use ({len(ransomware_cves)} found):\n" + "\n".join(_brief_cve_vendor(c) for c in ransomware_cves)
         if llm_client.is_enabled():
             answer = llm_client.generate(context_text, message)
@@ -735,7 +833,31 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             if any(alias.lower() in msg_lower for alias in [ta["name"]] + ta.get("aliases", []))
         ]
         if not actors:
-            actors = ta_module.get_all()[:5]
+            if llm_client.is_enabled():
+                _ta_ctx = (
+                    f"The user is asking about a threat actor: '{message}'.\n"
+                    f"This actor was NOT found in the local knowledge base, which covers: "
+                    f"APT28, APT29, Lazarus Group, APT41, APT40, Sandworm, Scattered Spider, "
+                    f"BlackCat/ALPHV, CL0P, LockBit, Volt Typhoon, Salt Typhoon, APT1, FIN7, MuddyWater.\n"
+                    f"Provide general threat intelligence from your cybersecurity knowledge: "
+                    f"origin/country, known TTPs, typical target sectors, and notable campaigns if known."
+                )
+                _ta_ans = _GEMINI_GENERAL_LABEL + llm_client.generate(_ta_ctx, message)
+            else:
+                _ta_ans = (
+                    "This threat actor was not found in the local knowledge base "
+                    "(covers: APT28, APT29, Lazarus Group, APT41, APT40, Sandworm, Scattered Spider, "
+                    "BlackCat/ALPHV, CL0P, LockBit, Volt Typhoon, Salt Typhoon, APT1, FIN7, MuddyWater). "
+                    "Configure GEMINI_API_KEY to enable general threat intelligence for unlisted actors."
+                )
+            return {
+                "answer": _ta_ans,
+                "intent": intent,
+                "sources": ["General Cybersecurity Knowledge"],
+                "related_cves": [],
+                "evidence_type": "GEMINI_GENERAL",
+                "local_evidence_found": False,
+            }
         actor_vendors: list[str] = []
         for ta in actors[:2]:
             actor_vendors.extend(ta.get("target_vendors", []))
@@ -749,6 +871,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         unique_cves.sort(key=lambda x: x.get("risk_score", 0), reverse=True)
         related_cves = unique_cves[:6]
         sources = ["Threat Actor Database", "CISA KEV", "NVD CVE", "Risk Scorer"]
+        evidence_type = "THREAT_ACTOR_KB"
+        local_evidence_found = True
         actor_ctx = "\n\n".join(
             f"ACTOR: {ta['name']} ({ta['country']})\nTargets: {', '.join(ta['target_vendors'])}\nCampaigns: {', '.join(ta['notable_campaigns'][:2])}"
             for ta in actors[:2]
@@ -771,6 +895,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             epss_cves = [recommender._row_to_dict(row) for _, row in epss_rows.iterrows()]
         related_cves = epss_cves[:6]
         sources = ["EPSS (FIRST.org)", "NVD CVE", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(epss_cves)
         context_text = f"TOP CVEs BY EPSS EXPLOIT PROBABILITY:\n" + "\n".join(
             f"  {c['cve_id']}: EPSS {c.get('epss_score',0):.4f} ({(c.get('epss_percentile',0) or 0)*100:.1f}th pct) | Risk {c.get('risk_score',0):.1f}/10{' [KEV]' if c.get('is_kev') else ''}"
             for c in epss_cves
@@ -799,6 +925,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             exp_cves = [recommender._row_to_dict(row) for _, row in exp_rows.iterrows()]
         related_cves = exp_cves[:6]
         sources = ["Exploit-DB", "NVD CVE", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(exp_cves)
         context_text = "CVEs WITH DETAILED EXPLOIT INFORMATION:\n" + "\n".join(
             f"  {c['cve_id']}: {c.get('exploit_type','')} | verified={c.get('exploit_verified',False)} | platform={c.get('exploit_platform','')} | risk={c.get('risk_score',0):.1f}/10"
             for c in exp_cves
@@ -822,6 +950,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         )
         related_cves = cvss_cves[:6]
         sources = ["NVD CVE", "CVSS Vector", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(cvss_cves)
         context_text = (
             f"CVEs matching CVSS filter (AV={av or 'Network'}, PR={pr or 'None'}, UI={ui or 'any'}):\n"
             + "\n".join(
@@ -838,6 +968,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
     else:
         intent = "open_project_question"
         sources = ["Project Knowledge Base", "Live Dataset Stats"]
+        evidence_type = "PROJECT_CONTEXT"
+        local_evidence_found = True
         project_ctx = _build_project_context()
         context_text = project_ctx + _OPEN_QUESTION_INSTRUCTION
         if llm_client.is_enabled():
@@ -850,4 +982,6 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
         "intent": intent,
         "sources": sources,
         "related_cves": related_cves[:6],
+        "evidence_type": evidence_type,
+        "local_evidence_found": local_evidence_found,
     }

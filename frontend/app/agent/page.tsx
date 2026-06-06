@@ -82,6 +82,23 @@ function IntentBadge({ intent }: { intent: string }) {
   );
 }
 
+function EvidenceBadge({ evidenceType }: { evidenceType: string }) {
+  const config: Record<string, { label: string; className: string }> = {
+    LOCAL_DB:        { label: "Local DB",        className: "bg-green-900/50 border-green-700 text-green-300" },
+    ML_OUTPUT:       { label: "ML Output",       className: "bg-blue-900/50 border-blue-700 text-blue-300" },
+    THREAT_ACTOR_KB: { label: "Threat Actor KB", className: "bg-orange-900/50 border-orange-700 text-orange-300" },
+    PROJECT_CONTEXT: { label: "Project Context", className: "bg-purple-900/50 border-purple-700 text-purple-300" },
+    GEMINI_GENERAL:  { label: "Gemini General",  className: "bg-yellow-900/50 border-yellow-700 text-yellow-300" },
+    OUT_OF_SCOPE:    { label: "Out of Scope",    className: "bg-red-900/50 border-red-700 text-red-300" },
+  };
+  const cfg = config[evidenceType] ?? { label: evidenceType, className: "bg-zinc-800 border-zinc-600 text-zinc-400" };
+  return (
+    <span className={`inline-block rounded border px-2 py-0.5 text-xs font-mono ${cfg.className}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
 function MiniCVECard({ cve }: { cve: CVE }) {
   return (
     <Link
@@ -143,6 +160,7 @@ function AgentBubble({ msg }: { msg: Message }) {
           {data && (
             <div className="flex items-center gap-2 mb-3 flex-wrap">
               <IntentBadge intent={data.intent} />
+              {data.evidence_type && <EvidenceBadge evidenceType={data.evidence_type} />}
               {data.gemini_enabled && (
                 <span className="rounded bg-emerald-900/50 border border-emerald-700 px-2 py-0.5 text-xs text-emerald-300 font-mono">
                   ✨ Gemini Enhanced

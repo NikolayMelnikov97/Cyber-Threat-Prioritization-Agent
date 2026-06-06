@@ -66,6 +66,8 @@ export interface ChatResponse {
   sources: string[];
   related_cves: CVE[];
   gemini_enabled: boolean;
+  evidence_type: string;
+  local_evidence_found: boolean;
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
