@@ -60,6 +60,19 @@ export interface ThreatActor {
   matched_vendors?: string[];
 }
 
+export interface DashboardStats {
+  total_cves: number;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  kev_count: number;
+  exploit_count: number;
+  anomaly_count: number;
+  ransomware_count: number;
+  high_epss_count: number;
+}
+
 export interface ChatResponse {
   answer: string;
   intent: string;
@@ -85,6 +98,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 export const getCVE = (id: string) => apiFetch<CVE>(`/cve/${id}`);
 export const getSimilar = (id: string, n = 5) =>
   apiFetch<CVE[]>(`/cve/${id}/similar?n=${n}`);
+export const getStats = () => apiFetch<DashboardStats>(`/stats`);
 export const getTopRisks = (n = 20) => apiFetch<CVE[]>(`/top-risks?n=${n}`);
 export const searchCVEs = (q: string) =>
   apiFetch<CVE[]>(`/search?q=${encodeURIComponent(q)}`);

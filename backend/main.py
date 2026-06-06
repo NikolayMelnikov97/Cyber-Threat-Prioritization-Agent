@@ -58,6 +58,31 @@ def get_similar(cve_id: str, n: int = Query(default=5, ge=1, le=20)):
     return recommender.get_similar(cve_id.upper(), top_n=n)
 
 
+@app.get("/stats")
+def get_stats():
+    df = recommender._df
+    if df is None:
+        return {
+            "total_cves": 0, "critical_count": 0, "high_count": 0,
+            "medium_count": 0, "low_count": 0, "kev_count": 0,
+            "exploit_count": 0, "anomaly_count": 0,
+            "ransomware_count": 0, "high_epss_count": 0,
+        }
+    labels = df["risk_label"].value_counts()
+    return {
+        "total_cves":       int(len(df)),
+        "critical_count":   int(labels.get("Critical", 0)),
+        "high_count":       int(labels.get("High", 0)),
+        "medium_count":     int(labels.get("Medium", 0)),
+        "low_count":        int(labels.get("Low", 0)),
+        "kev_count":        int(df["is_kev"].sum()),
+        "exploit_count":    int(df["has_exploit"].sum()),
+        "anomaly_count":    int(df["is_anomaly"].sum()),
+        "ransomware_count": int((df["ransomware_campaign"] == "Known").sum()),
+        "high_epss_count":  int((df["epss_score"].fillna(0) >= 0.5).sum()),
+    }
+
+
 @app.get("/top-risks")
 def top_risks(n: int = Query(default=20, ge=1, le=100)):
     return recommender.get_top_risks(n)
