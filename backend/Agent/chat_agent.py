@@ -538,6 +538,26 @@ _GEMINI_GENERAL_LABEL = (
 
 # ── Main agent function ───────────────────────────────────────────────────────
 
+def _extract_vendors_from_message(message: str) -> list[str]:
+    """Extract vendor/product names when the user lists them inline in the message."""
+    # Match "applications: X, Y" / "stack: X, Y" / "tools: X, Y" etc.
+    m = re.search(
+        r"(?:applications?|apps?|systems?|tools?|products?|software|stack|environment|infrastructure)\s*[:\-]\s*(.+?)(?:\?|$)",
+        message, re.I
+    )
+    if not m:
+        # "I use those applications: X, Y" or "I use X, Y, Z"
+        m = re.search(
+            r"(?:i|we)\s+use\s+(?:those\s+\w+\s*[:\-]?\s*|)(.+?)(?:\?|$)",
+            message, re.I
+        )
+    if not m:
+        return []
+    raw = m.group(1)
+    parts = re.split(r"[,&]|\band\b", raw, flags=re.I)
+    return [p.strip().strip(" .,?!") for p in parts if p.strip().strip(" .,?!")]
+
+
 def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
     if not _is_in_scope(message):
         return {
@@ -746,6 +766,8 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
 
     # ── environment_query ──
     elif intent == "environment_query":
+        if not env_vendors:
+            env_vendors = _extract_vendors_from_message(message)
         relevant_actors = ta_module.get_relevant_for_vendors(env_vendors) if env_vendors else []
         seen_ids: set[str] = set()
         env_cves: list[dict] = []

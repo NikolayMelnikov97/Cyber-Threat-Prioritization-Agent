@@ -30,6 +30,7 @@ docs/
 # Claude Code — local only, never commit
 .claude/
 CLAUDE.md
+.understand-anything/
 
 # Local folders
 Archive/
