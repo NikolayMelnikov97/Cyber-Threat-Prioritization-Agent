@@ -1,5 +1,13 @@
 const BACKEND_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL ||
+  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
+
+if (!BACKEND_URL) {
+  throw new Error(
+    "NEXT_PUBLIC_API_URL is not set. " +
+    "In Vercel: Project Settings → Environment Variables → add NEXT_PUBLIC_API_URL=https://<your-render-service>.onrender.com, then redeploy."
+  );
+}
 
 export interface CVE {
   cve_id: string;
@@ -84,6 +92,9 @@ export interface ChatResponse {
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  if (process.env.NODE_ENV === "development") {
+    console.debug("[api]", options?.method ?? "GET", `${BACKEND_URL}${path}`);
+  }
   const res = await fetch(`${BACKEND_URL}${path}`, {
     cache: "no-store",
     ...options,
