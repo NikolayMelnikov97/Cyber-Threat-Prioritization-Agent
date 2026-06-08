@@ -17,6 +17,7 @@ _INTENT_PATTERNS = [
     ("exploit_query",      re.compile(r"\bexploit|\bpoc\b|\bproof.of.concept", re.I)),
     ("anomaly_query",      re.compile(r"\banomal|\bunusual|\boutlier|\bstrange|\bflagged", re.I)),
     ("open_project_question", re.compile(r"\b(presentation|assignment|project|limitation|how (does|do|is|are) (this|the|it|your)|what (is|are) (this|the project)|teach|course|workshop|explain (the |this )?(system|architecture|algorithm|model|approach|method|technique))\b", re.I)),
+    ("package_query",      re.compile(r"\b(npm|pypi|maven|crates?\.io|cargo|rubygems?|go\s+module|pip\b|yarn\b|open.?source\s+packages?|affected\s+packages?|which\s+packages?|library\s+(affected|vulnerable)|dependenc\w+\s+(affected|vulnerable)|packages?\s+(affected|vulnerable|with\s+cve|data)|the\s+\w[\w\-\.]+\s+package|cve\w*\s+.*\bpackage\b)\b", re.I)),
     ("system_query",       re.compile(r"\b(affect(s|ing)?|vulnerabilit(y|ies) (for|in|on|affecting))\b|\b(apache|nginx|tomcat|spring|log4j|windows|linux|android|macos|ubuntu|debian|iis|active directory|exchange server|cisco|fortinet|ivanti|citrix|vmware|juniper|palo alto|solarwinds|atlassian|zoho|okta|sharepoint|office 365|exchange|kubernetes|docker)\b", re.I)),
     ("threat_actor_query", re.compile(r"\b(apt|threat actor|hacker(s)?|cyber group|gang|group(s)?|nation.?state|lazarus|fancy bear|cozy bear|sandworm|volt typhoon|salt typhoon|fin7|clop|lockbit|blackcat|scattered spider|alphv|apt28|apt29|apt40|apt41|apt1|muddywater|who (is|are) (behind|targeting|attacking)|which group|targeting \w+)\b", re.I)),
     ("ransomware_query",   re.compile(r"\b(ransomware|ransom(ware)?|lockbit|blackcat|clop|alphv|ryuk|encrypt(ed|ion) attack)\b", re.I)),
@@ -36,6 +37,7 @@ _CVE_AGNOSTIC_INTENTS = {
     "top_risks", "recommendation_query", "summary_query", "search_query",
     "latest_query", "system_query", "ransomware_query", "threat_actor_query",
     "environment_query", "epss_query", "exploit_detail_query", "cvss_filter_query",
+    "package_query",
 }
 
 
@@ -127,8 +129,13 @@ DATASETS USED:
   2. CISA KEV (Known Exploited Vulnerabilities catalog): ~1,200 CVEs confirmed as actively exploited in the wild.
      Adding KEV status adds +2.0 points to the composite risk score.
   3. Exploit-DB: ~50,000 public exploits. Used to flag CVEs with publicly available proof-of-concept code.
-     Having a public exploit adds +1.5 points to the composite risk score.
-  4. MITRE ATT&CK Enterprise: attack technique framework (downloaded for context and future use).
+     Having a public exploit adds up to +1.5 points to the composite risk score.
+  4. EPSS (Exploit Prediction Scoring System by FIRST.org): ML-based daily probability scores (0–1) predicting
+     exploitation within 30 days. Adds up to +2.0 points to the composite risk score.
+  5. OSV (Open Source Vulnerabilities by Google): ~279,000 package advisories mapping CVEs to specific
+     open-source package names and affected version ranges across npm, PyPI, Maven, Go, and crates.io.
+     ~2,200 CVEs in the dataset have OSV package data.
+  6. MITRE ATT&CK Enterprise: attack technique framework (sample data linking CVEs to ATT&CK techniques).
 
 ML / NLP METHODS:
   - TF-IDF (Term Frequency-Inverse Document Frequency): converts CVE text descriptions into numerical
@@ -147,14 +154,18 @@ ML / NLP METHODS:
 
 RISK SCORING FORMULA (composite, 0–10 scale):
   risk_score = min(
-    0.5 × CVSS_base_score
-    + 2.0 × is_kev        (boolean: is it in CISA KEV?)
-    + 1.5 × has_exploit   (boolean: is there a public exploit?)
+    0.5  × CVSS_base_score
+    + 2.0 × is_kev                  (actively exploited — CISA KEV)
+    + 1.2 × exploit_verified        (verified working exploit)
+    + 0.5 × exploit_remote          (remote exploit bonus)
+    + 0.3 × has_exploit             (any public exploit, unverified)
+    [exploit bonus capped at 1.5]
+    + 2.0 × epss_score              (EPSS 0–1 probability of exploitation in 30 days)
     + 0.5 × min(references_count / 20, 1) × 10  (community attention, capped)
   , 10)
   Labels: Critical (≥9.0), High (≥7.0), Medium (≥4.0), Low (<4.0)
-  Why this matters: a CVSS 7.0 CVE with no KEV/exploit may be lower priority than
-  a CVSS 5.0 CVE that is actively exploited in the wild.
+  Why this matters: a CVSS 7.0 CVE with no KEV/exploit/EPSS may be lower priority than
+  a CVSS 5.0 CVE that is actively exploited with a high EPSS score.
 
 AGENT CAPABILITIES (what users can ask):
   - Top-priority CVEs right now
@@ -170,6 +181,8 @@ AGENT CAPABILITIES (what users can ask):
   - System-specific vulnerabilities (e.g. "what CVEs affect Apache?")
   - CVEs associated with ransomware campaigns
   - Threat actor profiles (APT groups, ransomware gangs, nation-state actors)
+  - CVEs affecting open-source packages (npm, PyPI, Maven, Go, crates.io) via OSV data
+  - CVEs ranked by EPSS exploit probability
 
 ARCHITECTURE:
   User question → Intent detection (regex) → Tool selection (ML modules) →
@@ -221,6 +234,8 @@ def _cve_context(cve: dict) -> str:
         lines.append(f"Affected Vendors (CPE): {cve['cpe_vendors'][:200]}")
     if cve.get("mitre_techniques"):
         lines.append(f"MITRE ATT&CK Techniques: {cve['mitre_techniques']}")
+    if cve.get("affected_packages"):
+        lines.append(f"Affected Open-Source Packages (OSV): {cve['affected_packages'][:200]}")
     if cve.get("vendorProject"):
         vendor_str = cve["vendorProject"]
         if cve.get("product"):
@@ -409,6 +424,27 @@ def _offline_epss(cves: list[dict]) -> str:
         lines.append(f"{i}. {c['cve_id']} — EPSS {epss:.4f} ({pct*100:.1f}th pct){kev} | Risk {c.get('risk_score',0):.1f}/10")
         lines.append(f"   {(c.get('description') or '')[:150]}")
     lines.append("\nEPSS (Exploit Prediction Scoring System) by FIRST.org — updated daily. Higher percentile = higher real-world exploitation probability.")
+    return "\n".join(lines)
+
+
+def _offline_package_query(cves: list[dict], query: str = "") -> str:
+    if not cves:
+        return (
+            "No CVEs with open-source package data found in the current dataset. "
+            "OSV data covers ~2,200 of the 20,000 CVEs — mostly npm, PyPI, Maven, and Go packages."
+        )
+    lines = ["CVEs affecting open-source packages (sourced from Google's OSV — Open Source Vulnerabilities database):\n"]
+    for c in cves[:10]:
+        pkgs = [p.strip() for p in (c.get("affected_packages") or "").split(",") if p.strip()]
+        pkg_str = ", ".join(pkgs[:5])
+        kev = " [KEV]" if c.get("is_kev") else ""
+        exp = " [EXPLOIT]" if c.get("has_exploit") else ""
+        lines.append(f"  • {c['cve_id']}{kev}{exp} — Risk {c.get('risk_score', 0):.1f}/10 | {pkg_str}")
+        lines.append(f"    {(c.get('description') or '')[:150]}")
+    lines.append(
+        "\nOSV data covers npm, PyPI, Maven, Go, and crates.io packages. "
+        "Check the OSV advisory for exact affected version ranges before patching."
+    )
     return "\n".join(lines)
 
 
@@ -927,6 +963,45 @@ def handle(message: str, environment_vendors: list[str] | None = None) -> dict:
             answer = llm_client.generate(context_text, message)
         else:
             answer = _offline_epss(epss_cves)
+
+    # ── package_query ──
+    elif intent == "package_query":
+        df = recommender._df
+        pkg_cves: list[dict] = []
+        if df is not None and "affected_packages" in df.columns:
+            mask = df["affected_packages"].fillna("") != ""
+            # If the user names a specific package or keyword, narrow the results
+            q_lower = message.lower()
+            # strip intent-triggering and filler words; what remains is the package name, if any
+            keyword = re.sub(
+                r"\b(show|list|find|which|what|are|there|the|is|me|all|i|my|do|does|have|has"
+                r"|cves?|vulnerabilit\w*|vulnerable|affected|affecting|affect|for|in|with|about|any"
+                r"|packages?|libraries?|dependencies|open.?source"
+                r"|npm|pypi|maven|cargo|crates?\.io|go\s+module|rubygems?|pip|yarn)\b",
+                " ", q_lower, flags=re.I,
+            ).strip(" ?.,")
+            keyword = re.sub(r"\s{2,}", " ", keyword).strip()
+            # only apply the keyword filter if something meaningful remains (a package name, not a filler word)
+            if keyword and len(keyword) > 2 and keyword not in {"cve", "and", "or", "not"}:
+                mask &= df["affected_packages"].str.contains(re.escape(keyword), case=False, na=False)
+            pkg_rows = df[mask].nlargest(15, "risk_score")
+            pkg_cves = [recommender._row_to_dict(row) for _, row in pkg_rows.iterrows()]
+        related_cves = pkg_cves[:6]
+        sources = ["OSV (Open Source Vulnerabilities)", "NVD CVE", "Risk Scorer"]
+        evidence_type = "LOCAL_DB"
+        local_evidence_found = bool(pkg_cves)
+        context_text = (
+            "CVEs WITH AFFECTED OPEN-SOURCE PACKAGES (OSV):\n"
+            + "\n".join(
+                f"  {c['cve_id']}: packages={c.get('affected_packages','')[:100]} | risk={c.get('risk_score',0):.1f}/10"
+                f"{' [KEV]' if c.get('is_kev') else ''}{' [EXPLOIT]' if c.get('has_exploit') else ''}"
+                for c in pkg_cves
+            )
+        )
+        if llm_client.is_enabled():
+            answer = llm_client.generate(context_text, message)
+        else:
+            answer = _offline_package_query(pkg_cves, message)
 
     # ── exploit_detail_query ──
     elif intent == "exploit_detail_query":

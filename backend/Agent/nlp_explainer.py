@@ -33,6 +33,11 @@ def explain(cve: dict) -> str:
     elif epss > 0:
         parts.append(f"EPSS score: {epss:.4f} ({epss_pct*100:.1f}th percentile).")
 
+    packages = (cve.get("affected_packages") or "").strip()
+    if packages:
+        pkg_list = [p.strip() for p in packages.split(",") if p.strip()][:5]
+        parts.append(f"Affected open-source packages (OSV): {', '.join(pkg_list)}.")
+
     av = (cve.get("attack_vector") or "").strip()
     pr = (cve.get("privileges_required") or "").strip()
     ui = (cve.get("user_interaction") or "").strip()
