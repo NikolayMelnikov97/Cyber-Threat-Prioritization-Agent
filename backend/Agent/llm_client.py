@@ -7,6 +7,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 _client = None
 _model_name: str = ""
+_fallback_model: str = ""
 _enabled = False
 
 SYSTEM_PROMPT = """You are an expert cybersecurity analyst and SOC (Security Operations Center) assistant.
@@ -31,17 +32,18 @@ When CVE data is provided, always reference:
 
 
 def _init():
-    global _client, _model_name, _enabled
+    global _client, _model_name, _fallback_model, _enabled
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
         print("[llm_client] No GEMINI_API_KEY — offline template mode")
         return
     _model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite").strip()
+    _fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.0-flash-lite").strip()
     try:
         from google import genai  # type: ignore
         _client = genai.Client(api_key=api_key)
         _enabled = True
-        print(f"[llm_client] Gemini initialized with model {_model_name}")
+        print(f"[llm_client] Gemini initialized with model {_model_name} (fallback: {_fallback_model})")
     except Exception as e:
         print(f"[llm_client] Gemini init failed: {e}")
 
@@ -66,15 +68,32 @@ def _call_gemini(context: str, question: str) -> str:
         f"--- END DATA ---\n\n"
         f"Analyst question: {question}"
     )
+    result = _try_model(_model_name, prompt)
+    if result is not None:
+        return result
+
+    # Primary model failed — try fallback if it's a different model
+    if _fallback_model and _fallback_model != _model_name:
+        print(f"[llm_client] Trying fallback model {_fallback_model}")
+        result = _try_model(_fallback_model, prompt)
+        if result is not None:
+            return result
+
+    # Both failed — return raw context for offline template rendering
+    return context
+
+
+def _try_model(model: str, prompt: str) -> str | None:
     try:
-        response = _client.models.generate_content(
-            model=_model_name,
-            contents=prompt,
-        )
+        response = _client.models.generate_content(model=model, contents=prompt)
         text = response.text
         if not text:
-            raise ValueError("Empty response from Gemini")
+            raise ValueError("Empty response")
         return text.strip()
     except Exception as e:
-        print(f"[llm_client] Gemini call failed: {e}")
-        return context
+        err = str(e)
+        if "429" in err or "RESOURCE_EXHAUSTED" in err:
+            print(f"[llm_client] {model} quota exhausted — trying fallback")
+        else:
+            print(f"[llm_client] {model} call failed: {e}")
+        return None
