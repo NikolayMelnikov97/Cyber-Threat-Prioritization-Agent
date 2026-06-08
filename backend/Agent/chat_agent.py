@@ -18,6 +18,7 @@ _INTENT_PATTERNS = [
     ("anomaly_query",      re.compile(r"\banomal|\bunusual|\boutlier|\bstrange|\bflagged", re.I)),
     ("open_project_question", re.compile(r"\b(presentation|assignment|project|limitation|how (does|do|is|are) (this|the|it|your)|what (is|are) (this|the project)|teach|course|workshop|explain (the |this )?(system|architecture|algorithm|model|approach|method|technique))\b", re.I)),
     ("package_query",      re.compile(r"\b(npm|pypi|maven|crates?\.io|cargo|rubygems?|go\s+module|pip\b|yarn\b|open.?source\s+packages?|affected\s+packages?|which\s+packages?|library\s+(affected|vulnerable)|dependenc\w+\s+(affected|vulnerable)|packages?\s+(affected|vulnerable|with\s+cve|data)|the\s+\w[\w\-\.]+\s+package|cve\w*\s+.*\bpackage\b)\b", re.I)),
+    ("environment_query",  re.compile(r"\b(my environment|my stack|my system|my infrastructure|threats? (on|to|for|in|targeting) my|current threats?|what.*(affect|target|attack|threaten).*my|(affect|target|attack|threaten)ing my (stack|system|environment|infrastructure)|relevant.*my|my.*exposure|given my (environment|stack|system)|my (vendor|tech|technology|deployment))\b", re.I)),
     ("system_query",       re.compile(r"\b(affect(s|ing)?|vulnerabilit(y|ies) (for|in|on|affecting))\b|\b(apache|nginx|tomcat|spring|log4j|windows|linux|android|macos|ubuntu|debian|iis|active directory|exchange server|cisco|fortinet|ivanti|citrix|vmware|juniper|palo alto|solarwinds|atlassian|zoho|okta|sharepoint|office 365|exchange|kubernetes|docker)\b", re.I)),
     ("threat_actor_query", re.compile(r"\b(apt|threat actor|hacker(s)?|cyber group|gang|group(s)?|nation.?state|lazarus|fancy bear|cozy bear|sandworm|volt typhoon|salt typhoon|fin7|clop|lockbit|blackcat|scattered spider|alphv|apt28|apt29|apt40|apt41|apt1|muddywater|who (is|are) (behind|targeting|attacking)|which group|targeting \w+)\b", re.I)),
     ("ransomware_query",   re.compile(r"\b(ransomware|ransom(ware)?|lockbit|blackcat|clop|alphv|ryuk|encrypt(ed|ion) attack)\b", re.I)),
@@ -25,7 +26,6 @@ _INTENT_PATTERNS = [
     ("summary_query",      re.compile(r"\b(summar|overview|landscape|dataset|overall|big picture|report|happening|cybersecurity|cyber security)\b", re.I)),
     ("top_risks",          re.compile(r"\b(top|highest|most critical|biggest|worst|focus|priority|today|critical vulnerabilit|dangerous|severe|urgent|which.*critical|which.*vulnerabilit)\b", re.I)),
     ("recommendation_query", re.compile(r"\b(recommend|what should|next step|action|patch|mitigat|response|fix|remediat|worried about|should i)\b", re.I)),
-    ("environment_query",  re.compile(r"\b(my environment|my stack|my system|my infrastructure|threats? (on|to|for|in) my|current threats?|what.*(affect|target|attack).*my|relevant.*my|my.*exposure)\b", re.I)),
     ("search_query",       re.compile(r"\b(search|find|look for|show me|list.*cve|vulnerabilit(y|ies) (with|about|related))\b", re.I)),
 ]
 
